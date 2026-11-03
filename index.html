@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blackjack P2P</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --felt: #0e6b3a; --felt-dark: #063d20; --gold: #f2c14e; --gold-dark: #b8862b;
+    --wood: #4a2a14; --text: #f4f1e8; --muted: rgba(244,241,232,.65);
+    --red: #c8102e; --win: #4ade80; --lose: #f87171; --push: #e5e7eb;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
+  body {
+    font-family: Inter, system-ui, sans-serif; color: var(--text);
+    background: radial-gradient(ellipse at 50% 20%, #13894b 0%, var(--felt) 40%, var(--felt-dark) 100%) fixed;
+    background-color: var(--felt-dark);
+  }
+  body::before { /* textura de paño */
+    content: ''; position: fixed; inset: 0; pointer-events: none; opacity: .08;
+    background-image: repeating-linear-gradient(45deg, #000 0 1px, transparent 1px 4px);
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 16px; position: relative; }
+  h1 {
+    font-family: 'Playfair Display', serif; font-weight: 900; text-align: center; margin: 8px 0 4px;
+    font-size: clamp(32px, 7vw, 52px); letter-spacing: 2px; color: var(--gold);
+    text-shadow: 0 2px 0 var(--gold-dark), 0 6px 18px rgba(0,0,0,.5);
+  }
+  .tagline { text-align: center; color: var(--muted); font-size: 13px; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 16px; }
+
+  .panel {
+    background: rgba(0,0,0,.28); border: 1px solid rgba(242,193,78,.25); border-radius: 16px;
+    padding: 14px; margin: 12px 0; box-shadow: inset 0 1px 0 rgba(255,255,255,.05), 0 8px 24px rgba(0,0,0,.25);
+  }
+  input {
+    font: inherit; font-size: 16px; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(242,193,78,.4);
+    background: rgba(0,0,0,.35); color: var(--text); outline: none; min-width: 0;
+  }
+  input:focus { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(242,193,78,.25); }
+  button {
+    font: inherit; font-weight: 700; font-size: 15px; cursor: pointer; border: none; border-radius: 10px;
+    padding: 10px 16px; margin: 3px; color: #2b1a06;
+    background: linear-gradient(180deg, #ffd978, var(--gold) 55%, var(--gold-dark));
+    box-shadow: 0 3px 0 #7a5418, 0 6px 12px rgba(0,0,0,.3); transition: transform .08s, filter .15s;
+  }
+  button:hover:not(:disabled) { filter: brightness(1.08); }
+  button:active:not(:disabled) { transform: translateY(2px); box-shadow: 0 1px 0 #7a5418; }
+  button:disabled { opacity: .35; cursor: not-allowed; filter: grayscale(.6); }
+  button.ghost { background: rgba(255,255,255,.08); color: var(--text); box-shadow: inset 0 0 0 1px rgba(255,255,255,.2); }
+  .hidden { display: none !important; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .err { color: #ffb3b3; min-height: 1.2em; font-size: 14px; margin-top: 6px; }
+
+  /* Lobby */
+  #lobby { max-width: 420px; margin: 24px auto; text-align: center; }
+  #lobby .row { display: flex; gap: 6px; margin: 8px 0; }
+  #lobby .row input { flex: 1; }
+  #lobby .or { color: var(--muted); margin: 10px 0; font-size: 13px; letter-spacing: 2px; }
+  #create { width: 100%; margin: 0; padding: 14px; font-size: 17px; }
+
+  /* Barra superior */
+  .topbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+  .room { font-size: 14px; } .room b { font-size: 20px; letter-spacing: 3px; color: var(--gold); }
+
+  /* Banca */
+  .dealer-area { text-align: center; padding: 18px 10px 14px; border-bottom: 2px dashed rgba(242,193,78,.3); }
+  .label { font-family: 'Playfair Display', serif; font-size: 20px; color: var(--gold); letter-spacing: 1px; }
+  .badge {
+    display: inline-block; min-width: 34px; padding: 2px 10px; border-radius: 999px; font-weight: 800; font-size: 14px;
+    background: rgba(0,0,0,.45); border: 1px solid rgba(255,255,255,.2); margin-left: 6px; vertical-align: middle;
+  }
+  .badge.bust { background: var(--lose); color: #300; border-color: transparent; }
+  .badge.bj { background: var(--gold); color: #2b1a06; border-color: transparent; }
+  #msg { margin-top: 10px; font-weight: 700; font-size: 17px; min-height: 1.4em; }
+  .rules-line { text-align: center; padding: 8px 0 0; font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: rgba(242,193,78,.7); }
+
+  /* Cartas */
+  .cards { display: flex; justify-content: center; flex-wrap: wrap; min-height: 96px; padding: 8px 0; }
+  .card {
+    width: 64px; height: 92px; border-radius: 8px; background: #fffdf7; color: #1a1a1a; position: relative;
+    margin: 0 -10px; box-shadow: 0 4px 10px rgba(0,0,0,.4), inset 0 0 0 1px rgba(0,0,0,.1); font-weight: 800;
+  }
+  .card:first-child { margin-left: 0; }
+  .card.red { color: var(--red); }
+  .card .tl { position: absolute; top: 4px; left: 6px; font-size: 16px; line-height: 1; text-align: center; }
+  .card .tl small { display: block; font-size: 13px; }
+  .card .mid { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 30px; }
+  .card.back {
+    background: repeating-linear-gradient(45deg, #8b1a1a 0 6px, #a52a2a 6px 12px);
+    box-shadow: 0 4px 10px rgba(0,0,0,.4), inset 0 0 0 4px #fffdf7;
+  }
+  .card.deal { animation: deal .35s cubic-bezier(.2,.8,.3,1.2) both; }
+  @keyframes deal { from { transform: translate(120px,-140px) rotate(25deg); opacity: 0; } to { transform: none; opacity: 1; } }
+  .empty-slot { width: 64px; height: 92px; border-radius: 8px; border: 2px dashed rgba(255,255,255,.18); }
+
+  /* Controles */
+  #controls { text-align: center; }
+  .chips { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; margin: 6px 0 10px; }
+  .chip {
+    width: 52px; height: 52px; border-radius: 50%; padding: 0; margin: 0; font-size: 13px; font-weight: 800; color: #fff;
+    border: 4px dashed rgba(255,255,255,.85); box-shadow: 0 3px 0 rgba(0,0,0,.4), 0 6px 10px rgba(0,0,0,.3);
+  }
+  .chip[data-v="10"] { background: #2563eb; } .chip[data-v="20"] { background: #16a34a; }
+  .chip[data-v="50"] { background: #dc2626; } .chip[data-v="100"] { background: #111; }
+  .chip[data-v="500"] { background: #7c3aed; }
+  .bet-line { display: flex; justify-content: center; align-items: center; gap: 6px; flex-wrap: wrap; }
+  #bet { width: 110px; text-align: center; font-weight: 800; font-size: 20px; }
+  #actRow button { min-width: 110px; padding: 14px 16px; font-size: 16px; }
+  #actRow.myturn { animation: pulse 1.4s ease-in-out infinite; border-radius: 14px; }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 6px rgba(242,193,78,.25); } }
+  #waitTxt { color: var(--muted); padding: 8px; }
+  #timer { position: relative; height: 30px; border-radius: 999px; background: rgba(0,0,0,.35); overflow: hidden; margin-bottom: 12px; }
+  #timer i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: linear-gradient(90deg, var(--gold-dark), var(--gold)); transition: width .2s linear; }
+  #timer span { position: relative; line-height: 30px; font-weight: 800; font-size: 14px; text-shadow: 0 1px 2px rgba(0,0,0,.6); }
+  #timer.urgent i { background: linear-gradient(90deg, #991b1b, var(--lose)); }
+  #timer.urgent span { animation: blink .5s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: .5; } }
+
+  /* Jugadores */
+  #players { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+  .seat { margin: 0; transition: border-color .2s, box-shadow .2s; }
+  .seat.active { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold), 0 0 24px rgba(242,193,78,.35); }
+  .seat.me .pname::after { content: ' (vos)'; color: var(--muted); font-weight: 400; font-size: 13px; }
+  .seat.off { opacity: .5; }
+  .seat-head { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; }
+  .pname { font-weight: 800; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .stack { color: var(--gold); font-weight: 800; white-space: nowrap; }
+  .stack::before { content: '● '; color: #dc2626; }
+  .seat-sub { font-size: 13px; color: var(--muted); min-height: 1.2em; }
+  .hand { border-radius: 10px; padding: 4px; margin-top: 6px; }
+  .hand.turn { background: rgba(242,193,78,.12); outline: 2px solid var(--gold); }
+  .hand .cards { justify-content: flex-start; min-height: 0; padding: 4px 0 4px 6px; }
+  .hand .card { width: 52px; height: 74px; margin: 0 -8px; }
+  .hand .card:first-child { margin-left: 0; }
+  .hand .card .mid { font-size: 24px; } .hand .card .tl { font-size: 14px; }
+  .hand-info { display: flex; justify-content: space-between; align-items: center; font-size: 13px; padding: 0 4px; gap: 6px; }
+  .res { font-weight: 800; padding: 2px 8px; border-radius: 6px; font-size: 13px; animation: pop .35s ease-out both; }
+  @keyframes pop { from { transform: scale(.4); opacity: 0; } }
+  .res-win { background: var(--win); color: #052e12; } .res-blackjack { background: var(--gold); color: #2b1a06; }
+  .res-lose { background: var(--lose); color: #3b0606; } .res-push { background: var(--push); color: #222; }
+
+  @media (max-width: 520px) {
+    .card { width: 54px; height: 78px; } .card .mid { font-size: 24px; }
+    #actRow button { min-width: 0; flex: 1; padding: 12px 4px; font-size: 14px; }
+    #actRow { display: flex; flex-wrap: wrap; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>♠ BLACKJACK ♥</h1>
+  <div class="tagline">Mesa privada · peer to peer</div>
+
+  <div id="lobby" class="panel">
+    <div class="row"><input id="name" placeholder="Tu nombre" maxlength="20"></div>
+    <button id="create">Crear sala</button>
+    <div class="or">— O UNITE A UNA —</div>
+    <div class="row"><input id="code" placeholder="Código de sala" maxlength="10"> <button id="join">Unirse</button></div>
+    <div class="err" id="lobbyErr"></div>
+  </div>
+
+  <div id="game" class="hidden">
+    <div class="panel topbar">
+      <div class="room">Sala <b id="roomCode"></b></div>
+      <span class="muted" id="netInfo"></span>
+      <button id="copy" class="ghost">Copiar link de invitación</button>
+    </div>
+
+    <div class="panel">
+      <div class="dealer-area">
+        <span class="label">Banca</span><span id="dealerVal"></span>
+        <div class="cards" id="dealer"></div>
+        <div id="msg"></div>
+        <div class="muted" id="shoe"></div>
+      </div>
+      <div class="rules-line">Blackjack paga 3 a 2 · La banca se planta en 17</div>
+    </div>
+
+    <div class="panel" id="controls">
+      <div id="timer"><i></i><span></span></div>
+      <div id="betRow">
+        <div class="chips">
+          <button class="chip" data-v="10">10</button>
+          <button class="chip" data-v="20">20</button>
+          <button class="chip" data-v="50">50</button>
+          <button class="chip" data-v="100">100</button>
+          <button class="chip" data-v="500">500</button>
+        </div>
+        <div class="bet-line">
+          <button id="clearBet" class="ghost">Borrar</button>
+          <input id="bet" type="number" min="10" step="10" value="10">
+          <button id="betBtn">Apostar</button>
+          <button id="sitOut" class="ghost">Paso esta mano</button>
+          <button id="rebuy" class="hidden">Recargar 1000</button>
+        </div>
+        <div class="muted" style="margin-top:6px">Apuesta en múltiplos de 10</div>
+      </div>
+      <div id="actRow">
+        <button data-a="hit">Pedir</button>
+        <button data-a="stand">Plantarse</button>
+        <button data-a="double">Doblar</button>
+        <button data-a="split">Dividir</button>
+      </div>
+      <div id="waitTxt" class="hidden"></div>
+      <div class="err" id="err"></div>
+    </div>
+
+    <div id="players"></div>
+    <p class="muted" style="text-align:center">6 mazos · Doblar con 2 cartas (también tras dividir) · Dividir hasta 4 manos · Ases divididos reciben 1 carta · Tiempos: 15s para apostar, 20s por jugada (si no, te plantás). El que crea la sala hace de servidor: si cierra la pestaña, la partida termina.</p>
+  </div>
+</div>
+
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
