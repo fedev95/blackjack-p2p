@@ -1,2 +1,13 @@
 [build]
   publish = "."
+
+# Headers de seguridad para todo el sitio
+[[headers]]
+  for = "/*"
+  [headers.values]
+    # Solo scripts propios (PeerJS va copiado en /vendor). Señalización de PeerJS por HTTPS/WSS.
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://0.peerjs.com wss://0.peerjs.com; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "no-referrer"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"

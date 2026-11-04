@@ -8,7 +8,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
   :root {
-    --felt: #0e6b3a; --felt-dark: #063d20; --gold: #f2c14e; --gold-dark: #b8862b;
+    --gold: #f2c14e; --gold-dark: #b8862b;
     --wood: #4a2a14; --text: #f4f1e8; --muted: rgba(244,241,232,.65);
     --red: #c8102e; --win: #4ade80; --lose: #f87171; --push: #e5e7eb;
   }
@@ -16,12 +16,19 @@
   html, body { margin: 0; min-height: 100%; }
   body {
     font-family: Inter, system-ui, sans-serif; color: var(--text);
-    background: radial-gradient(ellipse at 50% 20%, #13894b 0%, var(--felt) 40%, var(--felt-dark) 100%) fixed;
-    background-color: var(--felt-dark);
+    /* fondo oscuro neutro con un brillo cálido arriba, detrás del título */
+    background:
+      radial-gradient(ellipse 60% 35% at 50% 0%, rgba(242,193,78,.10), transparent 70%),
+      radial-gradient(ellipse 90% 70% at 50% 30%, #2a2c31 0%, #17181c 50%, #0a0a0c 100%) fixed;
+    background-color: #0a0a0c;
   }
-  body::before { /* textura de paño */
-    content: ''; position: fixed; inset: 0; pointer-events: none; opacity: .08;
-    background-image: repeating-linear-gradient(45deg, #000 0 1px, transparent 1px 4px);
+  body::before { /* viñeta: los bordes se oscurecen */
+    content: ''; position: fixed; inset: 0; pointer-events: none;
+    background: radial-gradient(ellipse 75% 70% at 50% 45%, transparent 45%, rgba(0,0,0,.7) 100%);
+  }
+  body::after { /* grano muy sutil para que no se vea plano */
+    content: ''; position: fixed; inset: 0; pointer-events: none; opacity: .035;
+    background-image: repeating-linear-gradient(45deg, #fff 0 1px, transparent 1px 4px);
   }
   .wrap { max-width: 860px; margin: 0 auto; padding: 16px; position: relative; }
   h1 {
@@ -32,8 +39,10 @@
   .tagline { text-align: center; color: var(--muted); font-size: 13px; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 16px; }
 
   .panel {
-    background: rgba(0,0,0,.28); border: 1px solid rgba(242,193,78,.25); border-radius: 16px;
-    padding: 14px; margin: 12px 0; box-shadow: inset 0 1px 0 rgba(255,255,255,.05), 0 8px 24px rgba(0,0,0,.25);
+    background: linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,.02));
+    border: 1px solid rgba(242,193,78,.18); border-radius: 16px;
+    padding: 14px; margin: 12px 0; box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 10px 30px rgba(0,0,0,.45);
+    backdrop-filter: blur(2px);
   }
   input {
     font: inherit; font-size: 16px; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(242,193,78,.4);
@@ -52,7 +61,11 @@
   button.ghost { background: rgba(255,255,255,.08); color: var(--text); box-shadow: inset 0 0 0 1px rgba(255,255,255,.2); }
   .hidden { display: none !important; }
   .muted { color: var(--muted); font-size: 13px; }
-  .err { color: #ffb3b3; min-height: 1.2em; font-size: 14px; margin-top: 6px; }
+  .err { color: #ffb3b3; font-size: 14px; margin-top: 6px; }
+  .err:empty { display: none; }
+  /* en la partida: título más chico y sin subtítulo, con lugar para los botones de las esquinas */
+  body.in-game .tagline { display: none; }
+  body.in-game h1 { font-size: clamp(24px, 6vw, 42px); margin: 14px 0 4px; padding: 0 60px; }
 
   /* Lobby */
   #lobby { max-width: 420px; margin: 24px auto; text-align: center; }
@@ -62,45 +75,283 @@
   #create { width: 100%; margin: 0; padding: 14px; font-size: 17px; }
 
   /* Barra superior */
-  .topbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+  .vis { display: flex; gap: 8px; justify-content: center; margin: 10px 0 4px; }
+  .vis label { flex: 1; cursor: pointer; padding: 10px; border-radius: 10px; border: 1px solid rgba(242,193,78,.3); background: rgba(0,0,0,.25); font-weight: 600; }
+  .vis label:has(input:checked) { border-color: var(--gold); background: rgba(242,193,78,.15); }
+  .vis input { accent-color: var(--gold); }
+  .vis-help { margin: 4px 0 10px; }
+  #newPin, #joinPin { text-align: center; letter-spacing: 8px; font-weight: 800; font-size: 20px; }
+  .vis-tag { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: rgba(0,0,0,.35); margin-left: 6px; vertical-align: middle; }
+  #fairSum { font-weight: 700; }
+  .fair.ok #fairSum { color: var(--win); }
+  .fair.bad #fairSum { color: var(--lose); }
+  .fair details { margin-top: 8px; }
+  .fair summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+  #fairAlerts div { background: rgba(248,113,113,.15); border-left: 3px solid var(--lose); padding: 6px 10px; margin: 8px 0; border-radius: 4px; font-size: 14px; }
+  #fairAlerts div.notice { background: rgba(242,193,78,.12); border-left-color: var(--gold); }
+  .fair-help ul { padding-left: 18px; } .fair-help li { margin: 6px 0; } .fair-help p { margin: 8px 0; }
+  /* Botones flotantes en las esquinas */
+  .fab {
+    position: fixed; top: 14px; z-index: 45; width: 48px; height: 48px; margin: 0; padding: 0; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; font-size: 22px; color: var(--text);
+    background: rgba(30,31,36,.85); border: 1px solid rgba(242,193,78,.45); backdrop-filter: blur(6px);
+    box-shadow: 0 6px 18px rgba(0,0,0,.5);
+  }
+  .fab:hover:not(:disabled) { filter: none; border-color: var(--gold); }
+  .fab-left { left: max(14px, env(safe-area-inset-left)); }
+  .fab-right { right: max(14px, env(safe-area-inset-right)); }
+  .i-icon {
+    width: 24px; height: 24px; border-radius: 50%; border: 2px solid var(--gold); color: var(--gold);
+    display: flex; align-items: center; justify-content: center; font: italic 700 15px Georgia, 'Playfair Display', serif;
+  }
+  .fab.alert { border-color: var(--lose); box-shadow: 0 0 0 3px rgba(248,113,113,.45), 0 6px 18px rgba(0,0,0,.5); animation: pulse 1.2s ease-in-out infinite; }
+  .fab.alert::after {
+    content: '!'; position: absolute; top: -4px; right: -4px; width: 18px; height: 18px; border-radius: 50%;
+    background: var(--lose); color: #300; font-weight: 900; font-size: 12px; display: flex; align-items: center; justify-content: center;
+  }
+
+  /* Modal de información */
+  .info-sec { padding: 12px 0; border-top: 1px solid rgba(255,255,255,.08); }
+  .info-sec:first-of-type { border-top: 0; padding-top: 0; }
+  .info-sec h4 { margin: 0 0 8px; font-size: 12px; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); }
+  .room-bar { display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; margin: -2px 0 6px; }
+  .room-bar .room { font-size: 13px; color: var(--muted); }
+  .room-bar .room b { font-size: 17px; }
+  .room-bar #copy { margin: 0; padding: 5px 12px; font-size: 13px; }
+  .info-actions:not(:has(button:not(.hidden))) { display: none; }
+  .info-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+  .info-actions button { margin: 0; }
+  .rules { margin: 0; padding-left: 18px; font-size: 14px; } .rules li { margin: 4px 0; }
   .room { font-size: 14px; } .room b { font-size: 20px; letter-spacing: 3px; color: var(--gold); }
 
-  /* Banca */
-  .dealer-area { text-align: center; padding: 18px 10px 14px; border-bottom: 2px dashed rgba(242,193,78,.3); }
-  .label { font-family: 'Playfair Display', serif; font-size: 20px; color: var(--gold); letter-spacing: 1px; }
+  /* Mesa */
+  .table-wrap { container-type: inline-size; margin: 18px 0 10px; }
+  .table {
+    --tcw: clamp(22px, 5cqw, 56px); /* ancho base de carta, escala con la mesa */
+    --cw: var(--tcw); /* cada lugar lo puede achicar (ver renderSeats) */
+    position: relative; width: 100%; aspect-ratio: 2 / 1.08;
+    --r: clamp(16px, 4.5cqw, 44px); /* radio de las puntas de arriba */
+    background:
+      radial-gradient(ellipse 70% 60% at 50% 10%, rgba(255,255,255,.10), transparent 70%),
+      radial-gradient(ellipse at 50% 0%, var(--f1) 0%, var(--f2) 50%, var(--f3) 100%);
+    --f1: #169652; --f2: #0e6b3a; --f3: #084524;
+    transition: background .4s;
+    border-radius: var(--r) var(--r) 50% 50% / var(--r) var(--r) calc(100% - var(--r)) calc(100% - var(--r));
+    border: clamp(8px, 2.2cqw, 18px) solid #5a3216; border-top-width: clamp(6px, 1.4cqw, 12px);
+    box-shadow:
+      inset 0 0 0 2px #2a1607, inset 0 6px 30px rgba(0,0,0,.45), inset 0 0 120px rgba(0,0,0,.35),
+      0 0 0 2px #8a5a2b, 0 22px 50px rgba(0,0,0,.55);
+    background-clip: padding-box;
+  }
+  /* colores del paño */
+  .table[data-color="red"] { --f1: #b52a33; --f2: #861c24; --f3: #4c0d12; }
+  .table[data-color="blue"] { --f1: #2463b3; --f2: #184a86; --f3: #0b264a; }
+  .table[data-color="black"] { --f1: #3c3f45; --f2: #24262a; --f3: #0d0e10; }
+  .table[data-color="purple"] { --f1: #7c3cab; --f2: #58287c; --f3: #2e1346; }
+  .color-pick { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+  .color-pick button {
+    width: 26px; height: 26px; padding: 0; margin: 0; border-radius: 50%; border: 2px solid rgba(255,255,255,.35);
+    box-shadow: 0 2px 4px rgba(0,0,0,.4); cursor: pointer;
+  }
+  .color-pick button.on { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold); }
+  .color-pick [data-c="green"] { background: #0e6b3a; } .color-pick [data-c="red"] { background: #861c24; }
+  .color-pick [data-c="blue"] { background: #184a86; } .color-pick [data-c="black"] { background: #24262a; border-color: rgba(255,255,255,.6); }
+  .color-pick [data-c="purple"] { background: #58287c; }
+  /* Consumible al lado del nombre */
+  .tagrow { display: flex; align-items: center; gap: 4px; }
+  .itm {
+    position: relative; flex: none; width: calc(var(--tcw) * .72); height: calc(var(--tcw) * .72); min-width: 22px; min-height: 22px;
+    border-radius: 50%; background: rgba(0,0,0,.6); border: 1px solid rgba(242,193,78,.55);
+    display: flex; align-items: center; justify-content: center; font-size: max(13px, calc(var(--tcw) * .42));
+    box-shadow: 0 2px 6px rgba(0,0,0,.5); animation: pop .35s ease-out both; cursor: default;
+  }
+  .itm svg { width: 82%; height: 82%; }
+  .itm .gift { position: absolute; top: -7px; right: -7px; font-size: .55em; font-style: normal; }
+  .itm.big { width: 40px; height: 40px; font-size: 22px; }
+  .emo { line-height: 1; }
+  .inl svg { width: 1.2em; height: 1.2em; vertical-align: -0.25em; }
+
+  /* Efecto del cumaso */
+  .splash { position: fixed; inset: 0; z-index: 100; cursor: pointer; transition: opacity 1.4s; }
+  .splash.out { opacity: 0; }
+  .splash svg { position: absolute; inset: 0; width: 100%; height: 100%; opacity: .82; filter: drop-shadow(0 4px 6px rgba(0,0,0,.45)); }
+  .splash .splat { animation: splat .32s cubic-bezier(.15,1.5,.35,1) both; }
+  @keyframes splat { 0% { transform: scale(.05); } 60% { transform: scale(1.08); } 100% { transform: scale(1); } }
+  .splash .drip { transform-box: fill-box; transform-origin: top; animation: drip 3.2s cubic-bezier(.55,0,.75,.4) both; }
+  @keyframes drip { from { transform: scaleY(0); } }
+  body.shake { animation: shake .45s cubic-bezier(.36,.07,.19,.97); }
+  @keyframes shake {
+    15% { transform: translate(-6px, 3px); } 30% { transform: translate(5px, -4px); } 45% { transform: translate(-4px, 2px); }
+    60% { transform: translate(3px, -1px); } 80% { transform: translate(-1px, 1px); }
+  }
+  .splash-title {
+    position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%); width: 92%; text-align: center;
+    font: 900 clamp(30px, 8vw, 72px) 'Playfair Display', serif; color: var(--gold); line-height: 1.1;
+    text-shadow: 0 3px 0 #7a5418, 0 8px 30px rgba(0,0,0,.85), 0 0 4px #000; animation: titlepop .6s .4s cubic-bezier(.2,1.5,.4,1) both;
+  }
+  @keyframes titlepop { from { transform: translate(-50%, -50%) scale(.3) rotate(-8deg); opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { body.shake { animation: none; } }
+
+  /* Feed de novedades (abajo a la izquierda, arriba de los controles) */
+  #feed {
+    position: fixed; z-index: 30; left: max(12px, env(safe-area-inset-left)); bottom: calc(var(--ctrl-h, 180px) + 10px);
+    width: min(320px, 62vw); display: flex; flex-direction: column; gap: 4px; pointer-events: none;
+  }
+  .feed-item {
+    background: rgba(12,12,14,.78); border: 1px solid rgba(242,193,78,.22); border-left: 3px solid var(--gold);
+    border-radius: 8px; padding: 5px 9px; font-size: 12px; line-height: 1.35; backdrop-filter: blur(4px);
+    box-shadow: 0 4px 12px rgba(0,0,0,.4); animation: feedIn .35s ease-out both;
+  }
+  .feed-item:nth-last-child(n+4) { opacity: .55; } .feed-item:nth-last-child(n+6) { opacity: .3; }
+  @media (max-width: 600px) { .feed-item:nth-last-child(n+3) { display: none; } .feed-item { font-size: 11px; padding: 4px 8px; } }
+  .feed-item .inl svg { width: 1.1em; height: 1.1em; }
+  .gold { color: var(--gold); }
+  @keyframes feedIn { from { transform: translateX(-20px); opacity: 0; } }
+
+  /* Aviso de compras en la mesa */
+  #toast {
+    position: absolute; left: 50%; bottom: 3%; transform: translate(-50%, 20px); z-index: 6; opacity: 0; pointer-events: none;
+    background: rgba(0,0,0,.78); border: 1px solid rgba(242,193,78,.5); border-radius: 999px; padding: 6px 16px;
+    font-size: clamp(11px, 1.8cqw, 15px); white-space: nowrap; transition: opacity .3s, transform .3s; max-width: 92%;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+  .table::after { /* textura del paño */
+    content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; opacity: .07;
+    background-image: repeating-linear-gradient(45deg, #000 0 1px, transparent 1px 4px);
+  }
+  .felt-art { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .table::before { /* línea dorada interior, como en el paño real */
+    content: ''; position: absolute; inset: 0 3.5% 5% 3.5%; border-radius: 0 0 50% 50% / 0 0 100% 100%;
+    border: 2px solid rgba(242,193,78,.22); border-top: 0; pointer-events: none;
+  }
+  .felt-narrow { display: none; }
+  .felt-title { font: 900 30px 'Playfair Display', serif; fill: rgba(242,193,78,.5); letter-spacing: 3px; }
+  .felt-sub { font: 700 14px Inter, sans-serif; fill: rgba(255,255,255,.3); letter-spacing: 3px; }
+  .felt-title.n { font-size: 34px; letter-spacing: 2px; } .felt-sub.n { font-size: 20px; letter-spacing: 2px; }
+
+  .dealer-zone { position: absolute; top: 3%; left: 50%; transform: translateX(-50%); text-align: center; z-index: 2; }
+  .dlabel { font-family: 'Playfair Display', serif; font-size: clamp(13px, 2.4cqw, 20px); color: var(--gold); letter-spacing: 2px; text-transform: uppercase; }
+  .dealer-zone .cards { padding-top: 6px; }
+  #msg {
+    display: inline-block; margin-top: 6px; padding: 2px 12px; border-radius: 999px; background: rgba(0,0,0,.4);
+    font-weight: 800; font-size: clamp(11px, 2cqw, 16px); white-space: nowrap; min-height: 1.3em;
+  }
+  #msg:empty { display: none; }
+  #shoe { text-align: center; font-size: 12px; color: var(--muted); margin-top: 8px; }
   .badge {
-    display: inline-block; min-width: 34px; padding: 2px 10px; border-radius: 999px; font-weight: 800; font-size: 14px;
-    background: rgba(0,0,0,.45); border: 1px solid rgba(255,255,255,.2); margin-left: 6px; vertical-align: middle;
+    display: inline-block; min-width: 2.2em; padding: 1px .6em; border-radius: 999px; font-weight: 800; font-size: clamp(10px, 1.7cqw, 14px);
+    background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.22); vertical-align: middle; color: var(--text); font-family: Inter, sans-serif; letter-spacing: 0;
   }
   .badge.bust { background: var(--lose); color: #300; border-color: transparent; }
   .badge.bj { background: var(--gold); color: #2b1a06; border-color: transparent; }
-  #msg { margin-top: 10px; font-weight: 700; font-size: 17px; min-height: 1.4em; }
-  .rules-line { text-align: center; padding: 8px 0 0; font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: rgba(242,193,78,.7); }
 
   /* Cartas */
-  .cards { display: flex; justify-content: center; flex-wrap: wrap; min-height: 96px; padding: 8px 0; }
+  .cards { display: flex; justify-content: center; }
   .card {
-    width: 64px; height: 92px; border-radius: 8px; background: #fffdf7; color: #1a1a1a; position: relative;
-    margin: 0 -10px; box-shadow: 0 4px 10px rgba(0,0,0,.4), inset 0 0 0 1px rgba(0,0,0,.1); font-weight: 800;
+    width: var(--cw); height: calc(var(--cw) * 1.42); border-radius: calc(var(--cw) * .12); background: #fffdf7; color: #1a1a1a;
+    position: relative; flex: none; font-weight: 800; transition: margin .25s;
+    /* parte visible de cada carta apilada: proporcional, pero nunca menos de 11px (para leer el valor) */
+    margin-left: calc(max(11px, var(--cw) * (1 + var(--ov, -.52))) - var(--cw));
+    box-shadow: 0 3px 8px rgba(0,0,0,.45), inset 0 0 0 1px rgba(0,0,0,.12);
   }
   .card:first-child { margin-left: 0; }
   .card.red { color: var(--red); }
-  .card .tl { position: absolute; top: 4px; left: 6px; font-size: 16px; line-height: 1; text-align: center; }
-  .card .tl small { display: block; font-size: 13px; }
-  .card .mid { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 30px; }
-  .card.back {
-    background: repeating-linear-gradient(45deg, #8b1a1a 0 6px, #a52a2a 6px 12px);
-    box-shadow: 0 4px 10px rgba(0,0,0,.4), inset 0 0 0 4px #fffdf7;
-  }
+  .card .tl { position: absolute; top: 5%; left: 7%; font-size: max(8px, calc(var(--cw) * .27)); line-height: 1; text-align: center; }
+  .card .tl small { display: block; font-size: max(7px, calc(var(--cw) * .22)); }
+  .card .mid { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: calc(var(--cw) * .5); padding: 22% 0 0 18%; }
   .card.deal { animation: deal .35s cubic-bezier(.2,.8,.3,1.2) both; }
-  @keyframes deal { from { transform: translate(120px,-140px) rotate(25deg); opacity: 0; } to { transform: none; opacity: 1; } }
-  .empty-slot { width: 64px; height: 92px; border-radius: 8px; border: 2px dashed rgba(255,255,255,.18); }
+  @keyframes deal { from { transform: translate(0, -60cqw) rotate(25deg); opacity: 0; } to { transform: none; opacity: 1; } }
+  .empty-slot { width: var(--cw); height: calc(var(--cw) * 1.42); border-radius: calc(var(--cw) * .12); border: 2px dashed rgba(255,255,255,.22); flex: none; }
+
+  /* Lugares de los jugadores alrededor de la mesa */
+  .seat {
+    position: absolute; transform: translate(-50%, -76%); /* el ancla queda cerca del borde; las cartas apuntan al centro */ display: flex; flex-direction: column; align-items: center;
+    gap: calc(var(--cw) * .12); z-index: 3; transition: opacity .2s;
+  }
+  .seat .hands { display: flex; gap: calc(var(--cw) * .3); align-items: flex-end; min-height: calc(var(--cw) * 1.42); }
+  .seat .hand { display: flex; flex-direction: column; align-items: center; gap: 3px; border-radius: 8px; padding: 2px; position: relative; }
+  .seat .hand.turn { outline: 2px solid var(--gold); outline-offset: 2px; box-shadow: 0 0 18px rgba(242,193,78,.45); }
+  .seat .hand-info { display: flex; align-items: center; gap: 3px; }
+  .spot { /* círculo de apuesta en el paño */
+    width: calc(var(--cw) * .95); height: calc(var(--cw) * .95); border-radius: 50%; border: 2px solid rgba(242,193,78,.35);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .betchip {
+    width: 88%; height: 88%; border-radius: 50%; background: #c0392b; border: 3px dashed rgba(255,255,255,.85);
+    display: flex; align-items: center; justify-content: center; font-weight: 800; color: #fff;
+    font-size: clamp(8px, calc(var(--cw) * .24), 13px); box-shadow: 0 2px 4px rgba(0,0,0,.5);
+  }
+  .tag {
+    background: rgba(0,0,0,.62); border: 1px solid rgba(242,193,78,.35); border-radius: 999px;
+    padding: 2px 10px; text-align: center; white-space: nowrap; max-width: calc(var(--tcw) * 3.2); line-height: 1.25;
+  }
+  .tag .nm { display: block; font-weight: 800; font-size: clamp(10px, 1.7cqw, 14px); overflow: hidden; text-overflow: ellipsis; }
+  .tag .ch { display: block; color: var(--gold); font-weight: 800; font-size: clamp(9px, 1.5cqw, 12px); }
+  .tag .ch::before { content: '● '; color: #dc2626; }
+  .seat .sub { font-size: clamp(9px, 1.4cqw, 12px); color: var(--muted); min-height: 1.2em; white-space: nowrap; }
+  .seat.me .tag { border-color: var(--gold); background: rgba(60,40,5,.85); }
+  .seat .tag, .seat .itm { cursor: pointer; transition: transform .15s, border-color .15s; }
+  .seat:not(.me) .tag:hover { border-color: var(--gold); transform: scale(1.06); }
+  .seat.me .tag .nm::after { content: ' (vos)'; font-weight: 400; opacity: .7; }
+  .seat.active .tag { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold), 0 0 18px rgba(242,193,78,.6); animation: pulse 1.4s ease-in-out infinite; }
+  .seat.off { opacity: .45; }
+  .seat.active, .seat.me { z-index: 4; } .seat.active { z-index: 5; }
+  .res { font-weight: 800; padding: 1px 6px; border-radius: 6px; font-size: clamp(9px, 1.5cqw, 12px); white-space: nowrap; animation: pop .35s ease-out both; }
+  @keyframes pop { from { transform: scale(.4); opacity: 0; } }
+  .res-win { background: var(--win); color: #052e12; } .res-blackjack { background: var(--gold); color: #2b1a06; }
+  .res-lose { background: var(--lose); color: #3b0606; } .res-push { background: var(--push); color: #222; }
+
+  .table.crowded { --tcw: clamp(20px, 4.2cqw, 46px); }
+  @container (max-width: 560px) {
+    .table { aspect-ratio: 1 / 1.2; --tcw: clamp(22px, 7.6cqw, 42px); }
+    .table.crowded { --tcw: clamp(20px, 6.4cqw, 36px); }
+    .felt-wide { display: none; } .felt-narrow { display: block; }
+    .tag { padding: 1px 7px; }
+  }
 
   /* Controles */
-  #controls { text-align: center; }
-  .chips { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; margin: 6px 0 10px; }
+
+
+  /* Tienda */
+  .modal { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; padding: 16px; }
+  .modal-box {
+    width: 100%; max-width: 560px; max-height: 88vh; overflow-y: auto; border-radius: 18px; padding: 16px;
+    background: linear-gradient(180deg, #24262b, #16171a); border: 1px solid rgba(242,193,78,.3); box-shadow: 0 20px 60px rgba(0,0,0,.6);
+  }
+  .modal-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .modal-head b { font-family: 'Playfair Display', serif; font-size: 22px; color: var(--gold); }
+  .modal-head .modal-close { margin-left: auto; padding: 6px 12px; }
+  .shop-for {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 12px; border-radius: 10px;
+    background: rgba(0,0,0,.35); border: 1px solid rgba(242,193,78,.4); font-size: 15px;
+  }
+  .shop-for small { color: var(--muted); font-size: 12px; width: 100%; }
+  .shop-for button { margin: 0 0 0 auto; padding: 5px 12px; font-size: 13px; }
+  #shopStatus { min-height: 1.2em; margin: 8px 0; color: #ffcf7a; }
+  #shopGrid h4, #shopFeed h4 { margin: 14px 0 6px; font-size: 12px; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); }
+  .sgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; }
+  .sitem { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); border-radius: 12px; padding: 10px 6px; text-align: center; }
+  .sicon { font-size: 34px; height: 42px; display: flex; align-items: center; justify-content: center; }
+  .sicon svg { width: 42px; height: 42px; }
+  .sname { font-weight: 700; font-size: 14px; margin-top: 2px; }
+  .smeta { font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+  .sitem button { width: 100%; margin: 0; padding: 7px; font-size: 14px; }
+  .mine { display: flex; align-items: center; gap: 10px; background: rgba(242,193,78,.08); border: 1px solid rgba(242,193,78,.3); border-radius: 12px; padding: 8px 10px; margin-top: 10px; font-size: 14px; }
+  .mine button { margin-left: auto; padding: 6px 12px; }
+  #shopFeed div { font-size: 13px; padding: 3px 0; }
+  /* Controles fijos abajo */
+  #controls {
+    text-align: center; position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; margin: 0 auto; max-width: 860px;
+    border-radius: 18px 18px 0 0; border-bottom: 0; padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+    background: linear-gradient(180deg, rgba(36,38,43,.92), rgba(18,19,22,.97)); backdrop-filter: blur(10px);
+    box-shadow: 0 -10px 30px rgba(0,0,0,.55);
+  }
+  .wrap { padding-bottom: calc(var(--ctrl-h, 180px) + 16px); }
+  .chips { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; margin: 2px 0 8px; }
   .chip {
-    width: 52px; height: 52px; border-radius: 50%; padding: 0; margin: 0; font-size: 13px; font-weight: 800; color: #fff;
+    width: 44px; height: 44px; border-radius: 50%; padding: 0; margin: 0; font-size: 12px; font-weight: 800; color: #fff;
     border: 4px dashed rgba(255,255,255,.85); box-shadow: 0 3px 0 rgba(0,0,0,.4), 0 6px 10px rgba(0,0,0,.3);
   }
   .chip[data-v="10"] { background: #2563eb; } .chip[data-v="20"] { background: #16a34a; }
@@ -112,38 +363,14 @@
   #actRow.myturn { animation: pulse 1.4s ease-in-out infinite; border-radius: 14px; }
   @keyframes pulse { 50% { box-shadow: 0 0 0 6px rgba(242,193,78,.25); } }
   #waitTxt { color: var(--muted); padding: 8px; }
-  #timer { position: relative; height: 30px; border-radius: 999px; background: rgba(0,0,0,.35); overflow: hidden; margin-bottom: 12px; }
+  #timer { position: relative; height: 24px; border-radius: 999px; background: rgba(0,0,0,.35); overflow: hidden; margin-bottom: 8px; }
   #timer i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: linear-gradient(90deg, var(--gold-dark), var(--gold)); transition: width .2s linear; }
-  #timer span { position: relative; line-height: 30px; font-weight: 800; font-size: 14px; text-shadow: 0 1px 2px rgba(0,0,0,.6); }
+  #timer span { position: relative; line-height: 24px; font-weight: 800; font-size: 14px; text-shadow: 0 1px 2px rgba(0,0,0,.6); }
   #timer.urgent i { background: linear-gradient(90deg, #991b1b, var(--lose)); }
   #timer.urgent span { animation: blink .5s steps(2) infinite; }
   @keyframes blink { 50% { opacity: .5; } }
 
-  /* Jugadores */
-  #players { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
-  .seat { margin: 0; transition: border-color .2s, box-shadow .2s; }
-  .seat.active { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold), 0 0 24px rgba(242,193,78,.35); }
-  .seat.me .pname::after { content: ' (vos)'; color: var(--muted); font-weight: 400; font-size: 13px; }
-  .seat.off { opacity: .5; }
-  .seat-head { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; }
-  .pname { font-weight: 800; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .stack { color: var(--gold); font-weight: 800; white-space: nowrap; }
-  .stack::before { content: '● '; color: #dc2626; }
-  .seat-sub { font-size: 13px; color: var(--muted); min-height: 1.2em; }
-  .hand { border-radius: 10px; padding: 4px; margin-top: 6px; }
-  .hand.turn { background: rgba(242,193,78,.12); outline: 2px solid var(--gold); }
-  .hand .cards { justify-content: flex-start; min-height: 0; padding: 4px 0 4px 6px; }
-  .hand .card { width: 52px; height: 74px; margin: 0 -8px; }
-  .hand .card:first-child { margin-left: 0; }
-  .hand .card .mid { font-size: 24px; } .hand .card .tl { font-size: 14px; }
-  .hand-info { display: flex; justify-content: space-between; align-items: center; font-size: 13px; padding: 0 4px; gap: 6px; }
-  .res { font-weight: 800; padding: 2px 8px; border-radius: 6px; font-size: 13px; animation: pop .35s ease-out both; }
-  @keyframes pop { from { transform: scale(.4); opacity: 0; } }
-  .res-win { background: var(--win); color: #052e12; } .res-blackjack { background: var(--gold); color: #2b1a06; }
-  .res-lose { background: var(--lose); color: #3b0606; } .res-push { background: var(--push); color: #222; }
-
   @media (max-width: 520px) {
-    .card { width: 54px; height: 78px; } .card .mid { font-size: 24px; }
     #actRow button { min-width: 0; flex: 1; padding: 12px 4px; font-size: 14px; }
     #actRow { display: flex; flex-wrap: wrap; }
   }
@@ -156,28 +383,117 @@
 
   <div id="lobby" class="panel">
     <div class="row"><input id="name" placeholder="Tu nombre" maxlength="20"></div>
+    <div class="vis">
+      <label><input type="radio" name="vis" value="public" checked> 🌐 Pública</label>
+      <label><input type="radio" name="vis" value="private"> 🔒 Privada</label>
+    </div>
+    <div class="row hidden" id="newPinRow">
+      <input id="newPin" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="PIN de 6 dígitos" autocomplete="off">
+    </div>
+    <div class="muted vis-help" id="visHelp">Entra cualquiera que tenga el link o el código.</div>
     <button id="create">Crear sala</button>
     <div class="or">— O UNITE A UNA —</div>
-    <div class="row"><input id="code" placeholder="Código de sala" maxlength="10"> <button id="join">Unirse</button></div>
+    <div class="row"><input id="code" placeholder="Código de sala" maxlength="10" autocomplete="off"> <button id="join">Unirse</button></div>
+    <div class="row hidden" id="joinPinRow">
+      <input id="joinPin" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="PIN de la sala (6 dígitos)" autocomplete="off">
+    </div>
     <div class="err" id="lobbyErr"></div>
   </div>
 
   <div id="game" class="hidden">
-    <div class="panel topbar">
-      <div class="room">Sala <b id="roomCode"></b></div>
-      <span class="muted" id="netInfo"></span>
-      <button id="copy" class="ghost">Copiar link de invitación</button>
+    <!-- botones fijos en las esquinas -->
+    <button id="infoBtn" class="fab fab-left" aria-label="Información"><span class="i-icon">i</span></button>
+    <button id="shopBtn" class="fab fab-right" aria-label="Tienda">🛒</button>
+
+    <!-- código de sala y link, siempre a la vista debajo del título -->
+    <div class="room-bar">
+      <span class="room">Sala <b id="roomCode"></b> <span id="roomVis" class="vis-tag"></span></span>
+      <button id="copy" class="ghost">🔗 Copiar link</button>
     </div>
 
-    <div class="panel">
-      <div class="dealer-area">
-        <span class="label">Banca</span><span id="dealerVal"></span>
-        <div class="cards" id="dealer"></div>
-        <div id="msg"></div>
-        <div class="muted" id="shoe"></div>
+    <div id="info" class="modal hidden" role="dialog" aria-label="Información">
+      <div class="modal-box">
+        <div class="modal-head">
+          <b>Información</b>
+          <button class="ghost modal-close" data-close="info" aria-label="Cerrar">✕</button>
+        </div>
+
+        <section class="info-sec">
+          <h4>Sala</h4>
+          <div class="muted" id="netInfo"></div>
+          <div class="info-actions">
+            <button id="showPin" class="ghost hidden">Ver PIN</button>
+          </div>
+          <div id="colorPick" class="color-pick hidden" title="Color del paño (lo ven todos)">
+            <span>Color del paño</span>
+            <button data-c="green" aria-label="Verde"></button>
+            <button data-c="red" aria-label="Rojo"></button>
+            <button data-c="blue" aria-label="Azul"></button>
+            <button data-c="black" aria-label="Negro"></button>
+            <button data-c="purple" aria-label="Violeta"></button>
+          </div>
+        </section>
+
+        <section class="info-sec fair" id="fair">
+          <h4>Juego limpio</h4>
+          <div id="fairSum">🛡 Juego limpio</div>
+          <div id="fairAlerts"></div>
+          <details>
+            <summary>¿Cómo se evita la trampa?</summary>
+      <div class="muted fair-help">
+              <p>No hay servidor: el que crea la sala coordina la partida. Igual, <b>nadie puede hacer trampa sin que se note</b>, ni siquiera el host:</p>
+              <ul>
+                <li><b>Cada carta se sortea entre todos:</b> al empezar la mano, cada jugador se compromete con una cadena secreta y publica solo su hash. Para cada carta, todos revelan el siguiente valor y la carta sale de mezclarlos. Nadie conoce una carta antes de que salga, y nadie puede cambiar su valor después.</li>
+                <li><b>No hay cartas ocultas:</b> la banca recibe su segunda carta al final (regla europea), así que no hay nada secreto que espiar.</li>
+                <li><b>Primero la jugada, después la carta:</b> el host tiene que anunciar qué jugada va a consumir cada carta antes de sortearla. Tu navegador rechaza cualquier pedido fuera de lugar.</li>
+                <li><b>Auditoría de cada mano:</b> tu navegador verifica cada carta y vuelve a jugar la mano entera: reglas, banca, pagos y fichas.</li>
+                <li><b>Tu lugar es tuyo:</b> un token secreto en tu navegador impide que alguien entre con tu nombre.</li>
+              </ul>
+              <p><b>Lo único que puede hacer un host tramposo</b> es dejarte fuera del sorteo de una mano (como si te hubieras desconectado). Si lo hace, te salta una alerta roja.</p>
+            </div>
+          </details>
+        </section>
+
+        <section class="info-sec">
+          <h4>Reglas</h4>
+          <ul class="rules">
+            <li>Blackjack paga 3 a 2. La banca se planta en todos los 17.</li>
+            <li>La banca recibe su 2ª carta al final (regla europea). Contra su Blackjack solo perdés la apuesta original.</li>
+            <li>Doblar con 2 cartas, también después de dividir. Dividir hasta 4 manos; los ases divididos reciben 1 carta.</li>
+            <li>Apuestas en múltiplos de 10. 6 mazos con mezcla continua.</li>
+            <li>Tiempos: 15 s para apostar y 20 s por jugada (si no, te plantás).</li>
+            <li>El que crea la sala coordina la partida: si cierra la pestaña, la partida termina.</li>
+          </ul>
+          <div id="shoe" class="muted"></div>
+        </section>
       </div>
-      <div class="rules-line">Blackjack paga 3 a 2 · La banca se planta en 17</div>
     </div>
+
+    <div class="table-wrap">
+      <div class="table" id="table">
+        <svg class="felt-art felt-wide" viewBox="0 0 1000 540" aria-hidden="true">
+          <path id="wA" d="M 300 178 A 300 130 0 0 0 700 178" fill="none" />
+          <path id="wB" d="M 355 222 A 300 130 0 0 0 645 222" fill="none" />
+          <text class="felt-title"><textPath href="#wA" startOffset="50%" text-anchor="middle">BLACKJACK PAGA 3 A 2</textPath></text>
+          <text class="felt-sub"><textPath href="#wB" startOffset="50%" text-anchor="middle">LA BANCA SE PLANTA EN 17</textPath></text>
+        </svg>
+        <svg class="felt-art felt-narrow" viewBox="0 0 1000 1200" aria-hidden="true">
+          <path id="nA" d="M 265 440 A 330 170 0 0 0 735 440" fill="none" />
+          <path id="nB" d="M 345 505 A 320 170 0 0 0 655 505" fill="none" />
+          <text class="felt-title n"><textPath href="#nA" startOffset="50%" text-anchor="middle">BLACKJACK PAGA 3 A 2</textPath></text>
+          <text class="felt-sub n"><textPath href="#nB" startOffset="50%" text-anchor="middle">LA BANCA SE PLANTA EN 17</textPath></text>
+        </svg>
+        <div class="dealer-zone">
+          <div class="dlabel">Banca <span id="dealerVal"></span></div>
+          <div class="cards" id="dealer"></div>
+          <div id="msg"></div>
+        </div>
+        <div id="seats"></div>
+        <div id="toast"></div>
+      </div>
+    </div>
+
+    <div id="feed" aria-live="polite"></div>
 
     <div class="panel" id="controls">
       <div id="timer"><i></i><span></span></div>
@@ -194,9 +510,8 @@
           <input id="bet" type="number" min="10" step="10" value="10">
           <button id="betBtn">Apostar</button>
           <button id="sitOut" class="ghost">Paso esta mano</button>
-          <button id="rebuy" class="hidden">Recargar 1000</button>
+          <button id="rebuy" class="hidden">💸 Pedir fichas</button>
         </div>
-        <div class="muted" style="margin-top:6px">Apuesta en múltiplos de 10</div>
       </div>
       <div id="actRow">
         <button data-a="hit">Pedir</button>
@@ -208,12 +523,24 @@
       <div class="err" id="err"></div>
     </div>
 
-    <div id="players"></div>
-    <p class="muted" style="text-align:center">6 mazos · Doblar con 2 cartas (también tras dividir) · Dividir hasta 4 manos · Ases divididos reciben 1 carta · Tiempos: 15s para apostar, 20s por jugada (si no, te plantás). El que crea la sala hace de servidor: si cierra la pestaña, la partida termina.</p>
+    <div id="shop" class="modal hidden" role="dialog" aria-label="Tienda">
+      <div class="modal-box">
+        <div class="modal-head">
+          <b>🛒 Tienda</b><span id="shopChips" class="muted"></span>
+          <button id="shopClose" class="ghost modal-close" data-close="shop" aria-label="Cerrar">✕</button>
+        </div>
+        <div id="shopFor" class="shop-for"></div>
+        <div id="shopMine"></div>
+        <div id="shopStatus" class="muted"></div>
+        <div id="shopGrid"></div>
+        <div id="shopFeed" class="muted"></div>
+      </div>
+    </div>
+
   </div>
 </div>
 
-<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="vendor/peerjs-1.5.4.min.js"></script>
 <script type="module" src="app.js"></script>
 </body>
 </html>
