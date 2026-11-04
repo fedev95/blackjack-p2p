@@ -626,6 +626,7 @@ const TIMES = { bet: 15000, dealNow: 1500, turn: 20000, done: 6000 };
 let timer = null;
 let timerKey = null;
 let timerKind = null;
+let timerTotal = 0;
 let timerDeadline = 0;
 
 function schedule() {
@@ -645,6 +646,7 @@ function schedule() {
     // el reloj se reinicia con cada acción (cambia la cantidad de cartas o la mano)
     key = turnKey();
     kind = 'turn'; ms = TIMES.turn;
+    if (game.roundLog.actions.length === 0) ms += DEAL_STEP_MS * (2 * game.round.length + 1); // tiempo del reparto en pantalla
     const expected = key;
     fn = async () => {
       if (game.phase !== 'playing' || !game.turn || turnKey() !== expected) return;
@@ -654,12 +656,15 @@ function schedule() {
       if (game.phase === 'playing') game.message = `${name} no jugó a tiempo: se plantó`;
     };
   } else if (game.phase === 'done') {
-    key = 'done:' + game.roundNo; kind = 'done'; ms = TIMES.done; fn = async () => G.nextRound(game);
+    // la pausa del resultado se alarga lo que tarda la banca en mostrar sus cartas de a una
+    key = 'done:' + game.roundNo; kind = 'done'; ms = TIMES.done + DEALER_STEP_MS * Math.max(0, game.dealer.cards.length - 1);
+    fn = async () => G.nextRound(game);
   }
   if (key === timerKey) return;
   clearTimeout(timer);
   timerKey = key;
   timerKind = kind;
+  timerTotal = ms;
   timerDeadline = key ? Date.now() + ms : 0;
   if (key) timer = setTimeout(() => {
     timerKey = timerKind = null;
@@ -680,7 +685,7 @@ async function startRound() {
 function broadcast() {
   schedule();
   const state = G.publicState(game);
-  const t = { kind: timerKind, ms: timerDeadline ? timerDeadline - Date.now() : 0 };
+  const t = { kind: timerKind, ms: timerDeadline ? timerDeadline - Date.now() : 0, total: timerTotal };
   for (const c of conns.values()) if (c.open) c.send({ t: 'state', state, timer: t });
   setView(state, t);
 }
@@ -693,7 +698,9 @@ function setView(state, t) {
     sessionStorage.setItem('bj-state-' + roomCode, JSON.stringify({ state, myId, private: room.private }));
   } catch {}
   // se manda el tiempo restante (no la hora) para no depender de relojes desincronizados
-  timerView = t && t.kind ? { kind: t.kind, end: Date.now() + t.ms, total: TIMES[t.kind] } : { kind: null, end: 0, total: 0 };
+  timerView = t && t.kind ? { kind: t.kind, end: Date.now() + t.ms, total: num(t.total) || TIMES[t.kind] } : { kind: null, end: 0, total: 0 };
+  trackDeal(state);
+  trackDealer(state);
   render();
 }
 
@@ -775,15 +782,112 @@ const RES = { win: 'Gana', lose: 'Pierde', push: 'Empate', blackjack: '¡Blackja
 const num = (x) => (Number.isFinite(Number(x)) ? Number(x) : 0);
 const fmt = (n) => num(n).toLocaleString('es-AR');
 
+// ---------- La banca saca sus cartas de a una ----------
+// El estado llega con la mano ya resuelta; acá solo se dosifica lo que se muestra: las cartas de la banca
+// aparecen de a una y los resultados, pagos y fichas nuevas recién cuando terminó.
+const DEALER_STEP_MS = 800;
+let dealerAnim = { round: -1, shown: 0, timer: null };
+
+function trackDealer(s) {
+  const n = s.dealer.cards.length;
+  if (s.phase === 'dealing' || s.phase === 'playing') {
+    if (dealerAnim.timer) clearInterval(dealerAnim.timer);
+    dealerAnim = { round: s.roundNo, shown: n, timer: null };
+  } else if (s.phase === 'done') {
+    if (dealerAnim.round !== s.roundNo) dealerAnim = { round: s.roundNo, shown: n, timer: null }; // llegué tarde: sin animación
+    else if (dealerAnim.shown < n && !dealerAnim.timer) {
+      dealerAnim.timer = setInterval(() => {
+        if (dealing()) return; // primero termina el reparto inicial
+        dealerAnim.shown++;
+        if (!view || dealerAnim.shown >= view.dealer.cards.length) {
+          clearInterval(dealerAnim.timer);
+          dealerAnim.timer = null;
+        }
+        render();
+      }, DEALER_STEP_MS);
+    }
+  }
+}
+
+// ---------- Reparto inicial de a una carta ----------
+// Las cartas iniciales se sortean juntas (un solo ida y vuelta por la red), pero se muestran como en el
+// casino: una a cada jugador, la de la banca y la segunda a cada jugador, de a una.
+const DEAL_STEP_MS = 250;
+let dealAnim = { round: -1, shown: Infinity, total: 0, timer: null, seenDealing: false };
+
+function trackDeal(s) {
+  if (s.phase === 'dealing') {
+    if (dealAnim.round !== s.roundNo) {
+      if (dealAnim.timer) clearInterval(dealAnim.timer);
+      dealAnim = { round: s.roundNo, shown: 0, total: 0, timer: null, seenDealing: true };
+    }
+    return;
+  }
+  if (s.phase !== 'playing' && s.phase !== 'done') return;
+  if (dealAnim.round !== s.roundNo) {
+    dealAnim = { round: s.roundNo, shown: Infinity, total: 0, timer: null, seenDealing: false }; // llegué tarde
+    return;
+  }
+  if (dealAnim.seenDealing && !dealAnim.timer && dealAnim.shown === 0) {
+    dealAnim.total = 2 * s.round.length + 1;
+    dealAnim.timer = setInterval(() => {
+      dealAnim.shown++;
+      if (dealAnim.shown >= dealAnim.total) {
+        clearInterval(dealAnim.timer);
+        dealAnim.timer = null;
+        dealAnim.shown = Infinity;
+      }
+      render();
+    }, DEAL_STEP_MS);
+  }
+}
+const dealing = () => dealAnim.shown !== Infinity && dealAnim.round === (view && view.roundNo);
+
+const dealerPlaying = (s) => s.phase === 'done' && dealerAnim.round === s.roundNo && dealerAnim.shown < s.dealer.cards.length;
+
+// Copia del estado para mostrar mientras la banca juega: sin resultados ni pagos todavía.
+function presentState(s) {
+  const dealingNow = dealing();
+  if (!dealerPlaying(s) && !dealingNow) return s;
+  const d = JSON.parse(JSON.stringify(s));
+  if (dealingNow) {
+    // orden de casino: índice 0..n-1 primera carta de cada jugador, n la banca, n+1.. la segunda
+    const n = d.round.length;
+    d.round.forEach((id, j) => {
+      const h = d.players[id] && d.players[id].hands[0];
+      if (!h || d.players[id].hands.length > 1) return;
+      h.cards = h.cards.filter((_, k) => (k === 0 ? j : k === 1 ? n + 1 + j : Infinity) < dealAnim.shown);
+    });
+    d.dealer.cards = dealAnim.shown > n ? d.dealer.cards.slice(0, 1) : [];
+    d.message = 'Repartiendo…';
+    d.turn = null;
+    if (!dealerPlaying(s)) return d;
+  }
+  if (!dealingNow) {
+    d.dealer.cards = d.dealer.cards.slice(0, Math.max(1, Math.min(dealerAnim.shown, d.dealer.cards.length)));
+    d.message = 'La banca juega…';
+  }
+  for (const id of d.round) {
+    const p = d.players[id];
+    if (!p) continue;
+    for (const h of p.hands) {
+      p.chips -= num(h.payout);
+      h.result = null;
+      h.payout = 0;
+    }
+  }
+  return d;
+}
+
 function render() {
-  const s = view;
-  if (!s) return;
+  if (!view) return;
+  const s = presentState(view);
   const me = s.players[myId];
   const dCards = s.dealer.cards;
   const slot = '<div class="empty-slot" style="margin-left:8px"></div>';
   // regla europea: la 2ª carta de la banca sale recién al final
   $('dealer').innerHTML = dCards.length ? dCards.map(cardHtml('d')).join('') + (dCards.length === 1 && s.phase !== 'done' ? slot : '') : '<div class="empty-slot"></div>' + slot;
-  $('dealerVal').innerHTML = badge(dCards, dCards.length === 2 && G.isNatural({ cards: dCards }));
+  $('dealerVal').innerHTML = badge(dCards, dCards.length === 2 && !dealerPlaying(view) && G.isNatural({ cards: dCards }));
   $('msg').textContent = s.message;
   $('shoe').textContent = `Ronda ${s.roundNo} · 6 mazos, mezcla continua · cartas sorteadas entre todos`;
 
@@ -791,7 +895,7 @@ function render() {
   $('betRow').classList.toggle('hidden', !betting);
   if (me) $('myChips').textContent = fmt(me.chips);
   const legal = G.legalActions(s, myId);
-  const locked = actLock !== null && s.roundLog && actLock === `${s.roundNo}:${s.roundLog.actions.length}`;
+  const locked = dealing() || (actLock !== null && s.roundLog && actLock === `${s.roundNo}:${s.roundLog.actions.length}`);
   if (!locked) actLock = null;
   document.querySelectorAll('#actRow button').forEach((b) => (b.disabled = locked || !legal.includes(b.dataset.a)));
   const myTurn = legal.length > 0;
