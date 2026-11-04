@@ -1,5 +1,6 @@
 import * as G from './game.js';
 import { Verifier } from './verify.js';
+import { PEER_OPTIONS } from './net-config.js';
 
 const $ = (id) => document.getElementById(id);
 const PREFIX = 'bjp2p-fede-';
@@ -85,7 +86,7 @@ $('create').onclick = () => {
   const code = randomCode();
   $('lobbyErr').textContent = 'Creando sala...';
   lobbyBusy(true);
-  const peer = new Peer(PREFIX + code);
+  const peer = new Peer(PREFIX + code, PEER_OPTIONS);
   peer.on('open', () => {
     if (isHost) return; // reconexión al servidor de señalización
     isHost = true;
@@ -279,7 +280,16 @@ $('join').onclick = () => {
   $('lobbyErr').textContent = 'Conectando...';
   lobbyBusy(true);
 
-  const peer = new Peer();
+  const peer = new Peer(PEER_OPTIONS);
+  // si en 15 s no entramos, avisar con algo útil en vez de quedar colgados en "Conectando..."
+  const joinTimer = setTimeout(() => {
+    if (myId || peer.destroyed) return; // ya entró, o el host lo rechazó con un mensaje propio
+    peer.destroy();
+    lobbyBusy(false);
+    $('lobbyErr').innerHTML =
+      'No se pudo conectar con el host. Revisá que el código sea correcto y que la sala siga abierta. ' +
+      'Si están en redes distintas, puede ser la red: probá con otro wifi o con datos móviles.';
+  }, 15000);
   peer.on('connection', (c) => c.close()); // los jugadores solo hablan con el host
   peer.on('open', () => {
     hostConn = peer.connect(PREFIX + code, { reliable: true });
@@ -292,7 +302,9 @@ $('join').onclick = () => {
         room = { private: !!msg.private, pin: null };
         lsSet('bj-room-' + code, creds);
         verifier = new Verifier(myId, (m) => hostConn.open && hostConn.send(m));
+        clearTimeout(joinTimer);
         enterGame();
+        setTimeout(showConnType, 3000);
       } else if (msg.t === 'state' && myId && msg.state) {
         verifier.onState(msg.state);
         setView(msg.state, msg.timer);
@@ -323,12 +335,31 @@ $('join').onclick = () => {
     });
   });
   peer.on('error', (e) => {
+    clearTimeout(joinTimer);
     lobbyBusy(false);
     const t = e.type === 'peer-unavailable' ? 'No existe esa sala (o el host se fue)' : 'Error de red: ' + e.type;
     if (myId) $('err').textContent = t;
     else $('lobbyErr').textContent = t;
   });
 };
+
+// Muestra en el modal ⓘ si la conexión con el host es directa o pasa por un servidor de respaldo.
+async function showConnType() {
+  const pc = hostConn && hostConn.peerConnection;
+  if (!pc || !pc.getStats) return;
+  try {
+    const stats = await pc.getStats();
+    let type = null;
+    stats.forEach((r) => {
+      if (r.type === 'candidate-pair' && r.state === 'succeeded' && (r.nominated || r.selected)) {
+        const local = stats.get(r.localCandidateId);
+        const remote = stats.get(r.remoteCandidateId);
+        if (local) type = local.candidateType === 'relay' || (remote && remote.candidateType === 'relay') ? 'relay' : 'direct';
+      }
+    });
+    if (type) $('netInfo').textContent = type === 'relay' ? 'Conexión con el host: por servidor de respaldo (TURN)' : 'Conexión con el host: directa';
+  } catch {}
+}
 
 function enterGame() {
   document.body.classList.add('in-game');
@@ -527,6 +558,7 @@ function render() {
 
   const betting = s.phase === 'betting';
   $('betRow').classList.toggle('hidden', !betting);
+  if (me) $('myChips').textContent = fmt(me.chips);
   const legal = G.legalActions(s, myId);
   const locked = actLock !== null && s.roundLog && actLock === `${s.roundNo}:${s.roundLog.actions.length}`;
   if (!locked) actLock = null;

@@ -44,6 +44,7 @@ El que crea la sala coordina la partida, pero **no tiene ninguna ventaja ni pued
 - `verify.js`: verificador que corre en cada jugador (responde los sorteos y audita al host).
 - `app.js`: red (PeerJS), salas/PIN, relojes de la partida e interfaz.
 - `vendor/`: PeerJS 1.5.4.
+- `net-config.js`: servidores STUN/TURN. Para redes donde la conexión directa falla (algunos datos móviles o wifi de empresa), pegá ahí credenciales de un TURN propio (por ejemplo, la cuenta gratis de Metered).
 - `index.html`: página y estilos.
 
 ## Tests
