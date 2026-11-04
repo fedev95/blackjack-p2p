@@ -901,7 +901,20 @@ function playRounds(g, vs, rounds, r, { stopAt } = {}) {
       }
     }
   };
+  const playOut = () => {
+    while (g.phase === 'playing') {
+      const pid = g.turn.pid;
+      const legal = G.legalActions(g, pid);
+      const a = legal[r(legal.length)];
+      if (vs.has(pid)) vs.get(pid).noteAction(a);
+      step((gg) => G.act(gg, pid, a), g.roundLog.actions.length, { pid, a });
+      broadcast();
+    }
+    G.nextRound(g);
+    broadcast();
+  };
   broadcast();
+  if (g.phase === 'playing') playOut(); // terminar una mano que ya estaba empezada
   for (let k = 0; k < rounds; k++) {
     for (const id of g.seats) {
       if (!g.players[id].connected) continue;
@@ -914,16 +927,7 @@ function playRounds(g, vs, rounds, r, { stopAt } = {}) {
     step(G.dealInitial, -1, null);
     broadcast();
     if (stopAt === 'playing' && g.phase === 'playing') return;
-    while (g.phase === 'playing') {
-      const pid = g.turn.pid;
-      const legal = G.legalActions(g, pid);
-      const a = legal[r(legal.length)];
-      if (vs.has(pid)) vs.get(pid).noteAction(a);
-      step((gg) => G.act(gg, pid, a), g.roundLog.actions.length, { pid, a });
-      broadcast();
-    }
-    G.nextRound(g);
-    broadcast();
+    playOut();
   }
 }
 
@@ -1004,6 +1008,20 @@ t('trampa: el host nuevo se suma fichas al tomar la mesa', () => {
   G.joinPlayer(g2, 'Dos', tok.c2, 'z');
   playRounds(g2, new Map([['c2', vs.get('c2')]]), 2, r);
   assert.ok(vs.get('c2').alerts.some((a) => /fichas de Uno/.test(a)), vs.get('c2').alerts.join(' | '));
+});
+
+t('recargar a mitad de mano: el verificador nuevo no da falsas alarmas', () => {
+  const { g, vs, tok, r } = hostChangeTable();
+  playRounds(g, vs, 3, r);
+  playRounds(g, vs, 1, r, { stopAt: 'playing' });
+  // c2 recarga: verificador nuevo, sin su cadena; el host lo deja afuera del sorteo de esa mano
+  const fresh = new Verifier('c2', () => {});
+  const vs2 = new Map([['c1', vs.get('c1')], ['c2', fresh]]);
+  // termina la mano en curso (c2 ya no puede aportar al sorteo) y juega unas más
+  playRounds(g, vs2, 8, r);
+  assert.deepEqual(fresh.alerts, []);
+  assert.deepEqual(vs.get('c1').alerts, []);
+  assert.ok(fresh.roundsOk >= 8);
 });
 
 console.log(`OK ${n} tests`);

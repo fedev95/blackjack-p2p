@@ -47,6 +47,14 @@ if (params.get('sala')) $('code').value = params.get('sala').toUpperCase();
 $('name').value = lsGet('bj-name') || '';
 $('newPin').value = randomPin();
 
+// Si recargaste la página estando en una sala, volver a entrar solo (la pestaña recuerda la sala).
+let autoRejoin = false;
+try {
+  const active = sessionStorage.getItem('bj-active-room');
+  const sala = (params.get('sala') || '').toUpperCase();
+  if (active && active === sala && lsGet('bj-room-' + sala) && $('name').value) autoRejoin = true;
+} catch {}
+
 document.querySelectorAll('input[name=vis]').forEach((r) => (r.onchange = () => {
   const priv = document.querySelector('input[name=vis]:checked').value === 'private';
   $('newPinRow').classList.toggle('hidden', !priv);
@@ -333,8 +341,10 @@ $('join').onclick = async () => {
   if (pinTyped) creds.pin = pinTyped;
   $('lobbyErr').textContent = 'Conectando...';
   lobbyBusy(true);
-  const r = await joinRoom(code, name, creds, 15000);
+  const r = await joinRoom(code, name, creds, autoRejoin ? 8000 : 15000);
   if (r === 'ok') return;
+  // volviste a una sala y no quedó nadie coordinándola: la rearmás vos con el último estado guardado
+  if (autoRejoin && (r === 'unavailable' || r === 'timeout') && (await restoreRoom(code, name, creds))) return;
   lobbyBusy(false);
   if (r === 'timeout')
     $('lobbyErr').textContent =
@@ -427,6 +437,25 @@ function joinRoom(code, name, creds, timeoutMs) {
 // código. Si el elegido tampoco aparece, a los 8 s lo intenta el siguiente, y así.
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Sirve tanto si el host se fue como si se cortó tu propia conexión: en los dos casos hay que volver a
+// encontrar la mesa (el mismo código de sala). Sin internet no gasta intentos: espera a que vuelva.
+let wakeUp = null; // corta la espera entre intentos cuando vuelve internet
+window.addEventListener('online', () => wakeUp && wakeUp());
+const nap = (ms) => new Promise((r) => {
+  const t = setTimeout(r, ms);
+  wakeUp = () => {
+    clearTimeout(t);
+    r();
+  };
+});
+
+function reconnectUI(on, text) {
+  document.body.classList.toggle('reconnecting', on);
+  $('reconnect').classList.toggle('hidden', !on);
+  if (text !== undefined) $('reconnectTxt').textContent = text;
+  $('retryBtn').classList.add('hidden');
+}
+
 async function onHostLost() {
   if (migrating || isHost) return;
   migrating = true;
@@ -435,34 +464,49 @@ async function onHostLost() {
   const code = roomCode;
   const creds = lsGet('bj-room-' + code) || {};
   hostConn = null;
-  $('err').textContent = `${oldHost ? oldHost.name : 'El host'} se desconectó. Reorganizando la mesa...`;
   const order = last ? last.seats.filter((id) => id !== last.hostId && last.players[id] && last.players[id].connected) : [];
   const k = order.indexOf(myId);
   const start = Date.now();
-  while (Date.now() - start < 90000) {
-    if (k >= 0 && Date.now() - start >= k * 8000 && last) {
+  let offlineMs = 0; // el tiempo sin internet no cuenta para decidir quién toma la mesa
+  const tick = setInterval(() => {
+    const secs = Math.round((Date.now() - start) / 1000);
+    $('reconnectTxt').textContent = navigator.onLine
+      ? `Se cortó la conexión con la mesa. Reconectando… (${secs} s)`
+      : 'Sin internet. Vuelvo a la mesa apenas vuelva la conexión…';
+  }, 500);
+  reconnectUI(true, 'Se cortó la conexión con la mesa. Reconectando…');
+  const finish = (ok, text) => {
+    clearInterval(tick);
+    migrating = false;
+    if (ok) {
+      reconnectUI(false);
+      $('err').textContent = '';
+    } else {
+      reconnectUI(true, text);
+      $('retryBtn').classList.remove('hidden');
+    }
+  };
+  while (Date.now() - start < 180000) {
+    if (!navigator.onLine) {
+      const t0 = Date.now();
+      await nap(5000);
+      offlineMs += Date.now() - t0;
+      continue;
+    }
+    // tomar la mesa solo si me toca y estoy online (si el que se cortó soy yo, el código sigue ocupado)
+    if (k >= 0 && last && Date.now() - start - offlineMs >= k * 8000) {
       const peer = await claimRoom(code);
       if (peer) {
         becomeHost(peer, last, oldHost);
-        migrating = false;
-        return;
+        return finish(true);
       }
     }
     const r = await joinRoom(code, myName, creds, 5000);
-    if (r === 'ok') {
-      $('err').textContent = '';
-      migrating = false;
-      return;
-    }
-    if (r && r.error) {
-      $('err').textContent = r.error;
-      migrating = false;
-      return;
-    }
-    await sleep(1500);
+    if (r === 'ok') return finish(true);
+    if (r && r.error) return finish(false, r.error);
+    await nap(1500);
   }
-  $('err').textContent = 'No se pudo rearmar la mesa. Recargá la página para volver a intentar.';
-  migrating = false;
+  finish(false, 'No se pudo volver a la mesa.');
 }
 
 // Intenta quedarse con el código de sala. Falla si el host anterior todavía lo tiene.
@@ -490,14 +534,31 @@ function becomeHost(peer, last, oldHost) {
   clientPeer = null;
   const { game: g, voided } = G.fromState(last, myId);
   const me = g.players[myId];
-  const was = oldHost ? oldHost.name : 'El host';
+  const was = oldHost && oldHost.id !== myId ? `${oldHost.name} se fue` : 'Se rearmó la mesa';
   g.message = voided
-    ? `${was} se fue: la mano se anuló y se devolvieron las apuestas. Ahora coordina ${me.name}`
-    : `${was} se fue. Ahora coordina ${me.name}`;
+    ? `${was}: la mano se anuló y se devolvieron las apuestas. Ahora coordina ${me.name}`
+    : `${was}. Ahora coordina ${me.name}`;
   const creds = lsGet('bj-room-' + roomCode) || {};
   room = { private: room.private, pin: room.private ? creds.pin || null : null };
   $('err').textContent = '';
+  enterGame();
   startHosting(peer, g);
+}
+
+async function restoreRoom(code, name, creds) {
+  let saved = null;
+  try {
+    saved = JSON.parse(sessionStorage.getItem('bj-state-' + code));
+  } catch {}
+  if (!saved || !saved.state || !saved.myId || !saved.state.players[saved.myId]) return false;
+  const peer = await claimRoom(code);
+  if (!peer) return false;
+  myId = saved.myId;
+  roomCode = code;
+  myName = name;
+  room = { private: !!saved.private, pin: creds.pin || null };
+  becomeHost(peer, saved.state, saved.state.players[saved.state.hostId]);
+  return true;
 }
 
 // Muestra en el modal ⓘ si la conexión con el host es directa o pasa por un servidor de respaldo.
@@ -520,6 +581,11 @@ async function showConnType() {
 
 function enterGame() {
   document.body.classList.add('in-game');
+  // la URL queda con el código de sala y la pestaña lo recuerda: si recargás, volvés a entrar solo
+  try {
+    history.replaceState(null, '', location.pathname + '?sala=' + roomCode);
+    sessionStorage.setItem('bj-active-room', roomCode);
+  } catch {}
   $('lobby').classList.add('hidden');
   $('game').classList.remove('hidden');
   $('roomCode').textContent = roomCode;
@@ -622,6 +688,10 @@ function broadcast() {
 let timerView = { kind: null, end: 0, total: 0 };
 function setView(state, t) {
   view = state;
+  // la pestaña guarda el último estado: si recargás y no queda nadie coordinando, la mesa se rearma con esto
+  try {
+    sessionStorage.setItem('bj-state-' + roomCode, JSON.stringify({ state, myId, private: room.private }));
+  } catch {}
   // se manda el tiempo restante (no la hora) para no depender de relojes desincronizados
   timerView = t && t.kind ? { kind: t.kind, end: Date.now() + t.ms, total: TIMES[t.kind] } : { kind: null, end: 0, total: 0 };
   render();
@@ -1180,4 +1250,10 @@ function renderFair() {
   $('fairAlerts').innerHTML =
     verifier.alerts.map((a) => `<div>${esc(a)}</div>`).join('') +
     verifier.notices.map((a) => `<div class="notice">${esc(a)}</div>`).join('');
+}
+
+$('retryBtn').onclick = () => onHostLost();
+if (autoRejoin) {
+  $('lobbyErr').textContent = 'Volviendo a la sala…';
+  $('join').click();
 }

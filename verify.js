@@ -25,6 +25,7 @@ export class Verifier {
     this.lastShopSeq = 0;
     this.myBuys = []; // compras que pedí y todavía no vi
     this.alerts = [];
+    this.partialRound = undefined; // mano que ya estaba en juego cuando arrancó este verificador (ej. recargaste)
     this.notices = []; // avisos que no son necesariamente trampa (ej. alguien quedó fuera del sorteo)
     this.roundsOk = 0;
     this.cardsOk = 0;
@@ -92,6 +93,7 @@ export class Verifier {
   }
 
   check(s) {
+    if (this.partialRound === undefined) this.partialRound = s.phase === 'betting' ? null : s.roundNo;
     this.checkShop(s);
     // en el resultado de una mano, solo después de auditarla (antes las fichas reflejan los pagos)
     if (s.phase === 'betting' || (s.phase === 'done' && this.audited.has(s.roundNo))) this.checkBetweenHands(s);
@@ -141,11 +143,13 @@ export class Verifier {
       const expected = [G.HOST, ...s.round.filter((id) => id !== s.hostId)];
       if (!same(expected, f.contributors)) this.alert('El host armó mal la lista del sorteo de cartas');
       const imIn = s.round.includes(this.myId);
-      if (imIn && this.myId !== s.hostId) {
+      // si llegué con la mano empezada no tengo mi cadena de esa mano: no se puede reclamar nada propio
+      const mine = R !== this.partialRound;
+      if (mine && imIn && this.myId !== s.hostId) {
         const chain = this.chains.get(R);
         if (!chain || f.anchors[this.myId] !== chain[0]) this.alert('El host no usó tu compromiso para el sorteo');
       }
-      if (!imIn && rec.betSeen > 0 && s.players[this.myId]?.connected) this.alert('El host te dejó afuera de la mano aunque apostaste');
+      if (mine && !imIn && rec.betSeen > 0 && s.players[this.myId]?.connected) this.alert('El host te dejó afuera de la mano aunque apostaste');
     } else if (!same(rec.contributors, f.contributors) || !same(rec.anchors, f.anchors)) {
       this.alert('El host cambió el sorteo a mitad de mano');
       return;
@@ -156,7 +160,9 @@ export class Verifier {
       if (rec.dropped.some((x) => same(x, d))) continue;
       if (d.k < rec.cards.length) this.alert('El host excluyó a alguien del sorteo de forma retroactiva');
       rec.dropped.push(d);
-      if (d.cid === this.myId) {
+      if (d.cid === this.myId && R === this.partialRound) {
+        // normal: al recargar perdí mi cadena de esta mano, no puedo seguir aportando al sorteo
+      } else if (d.cid === this.myId) {
         this.alert(rec.revealedUpTo > d.k ? 'El host te excluyó del sorteo aunque respondiste a tiempo' : 'El host te excluyó del sorteo de cartas');
       } else {
         const name = s.players[d.cid]?.name ?? '?';

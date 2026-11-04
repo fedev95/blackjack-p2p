@@ -341,6 +341,18 @@
   .mine { display: flex; align-items: center; gap: 10px; background: rgba(242,193,78,.08); border: 1px solid rgba(242,193,78,.3); border-radius: 12px; padding: 8px 10px; margin-top: 10px; font-size: 14px; }
   .mine button { margin-left: auto; padding: 6px 12px; }
   #shopFeed div { font-size: 13px; padding: 3px 0; }
+  /* Reconectando: aviso arriba de los controles y controles apagados */
+  #reconnect {
+    display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px;
+    padding: 8px 12px; border-radius: 10px; background: rgba(242,193,78,.12); border: 1px solid rgba(242,193,78,.45);
+    font-weight: 700; font-size: 14px; color: #ffe2a0;
+  }
+  #reconnect button { margin: 0; padding: 6px 14px; font-size: 13px; }
+  .spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid rgba(242,193,78,.3); border-top-color: var(--gold); animation: spin .8s linear infinite; }
+  #retryBtn:not(.hidden) ~ .spin, #reconnect:has(#retryBtn:not(.hidden)) .spin { display: none; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  body.reconnecting #betRow, body.reconnecting #actRow { opacity: .35; pointer-events: none; filter: grayscale(.6); }
+
   /* Controles fijos abajo */
   #controls {
     text-align: center; position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; margin: 0 auto; max-width: 860px;
@@ -514,6 +526,7 @@
     <div id="feed" aria-live="polite"></div>
 
     <div class="panel" id="controls">
+      <div id="reconnect" class="hidden"><span class="spin"></span><span id="reconnectTxt"></span><button id="retryBtn" class="hidden">Reintentar</button></div>
       <div id="timer"><i></i><span></span></div>
       <div id="betRow">
         <div class="my-chips">Tus fichas: <b id="myChips">0</b></div>
