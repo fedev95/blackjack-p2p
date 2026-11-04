@@ -892,6 +892,11 @@ function addFeed(e) {
   item.innerHTML = line;
   $('feed').appendChild(item);
   while ($('feed').children.length > 6) $('feed').firstChild.remove();
+  // se va solo: 12 s visible y medio segundo de salida
+  setTimeout(() => {
+    item.classList.add('out');
+    setTimeout(() => item.remove(), 650);
+  }, 12000);
 }
 
 function renderSeats(s) {
@@ -938,10 +943,23 @@ document.querySelectorAll('.chip').forEach((b) => {
   b.onclick = () => {
     const cur = Number($('bet').value) || 0;
     const max = view && view.players[myId] ? view.players[myId].chips : Infinity;
-    $('bet').value = Math.min(cur + Number(b.dataset.v), Math.floor(max / 10) * 10);
+    if (b.id === 'allIn') setBet(max);
+    else setBet(Math.min(cur + Number(b.dataset.v), max));
   };
 });
-$('clearBet').onclick = () => ($('bet').value = 0);
+$('clearBet').onclick = () => setBet(0);
+
+// Apuesta: múltiplo de 10 y el campo se agranda según la cantidad de dígitos
+function setBet(v) {
+  $('bet').value = Math.max(0, Math.floor(num(v) / 10) * 10);
+  fitBet();
+}
+function fitBet() {
+  const digits = String($('bet').value || '').length;
+  $('bet').style.width = Math.max(4, digits + 2) + 'ch';
+}
+$('bet').addEventListener('input', fitBet);
+fitBet();
 
 let alertShown = false;
 function renderFair() {

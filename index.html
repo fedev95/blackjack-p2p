@@ -358,7 +358,9 @@
   .chip[data-v="50"] { background: #dc2626; } .chip[data-v="100"] { background: #111; }
   .chip[data-v="500"] { background: #7c3aed; }
   .bet-line { display: flex; justify-content: center; align-items: center; gap: 6px; flex-wrap: wrap; }
-  #bet { width: 110px; text-align: center; font-weight: 800; font-size: 20px; }
+  #bet { width: 6ch; min-width: 6ch; max-width: 100%; text-align: center; font-weight: 800; font-size: 20px; box-sizing: content-box; transition: width .15s; }
+  .chip.all-in { background: linear-gradient(180deg, #ffd978, var(--gold) 55%, var(--gold-dark)); color: #2b1a06; border-color: rgba(43,26,6,.6); font-size: 11px; }
+  .feed-item.out { opacity: 0 !important; transform: translateX(-20px); transition: opacity .6s, transform .6s; }
   #actRow button { min-width: 110px; padding: 14px 16px; font-size: 16px; }
   #actRow.myturn { animation: pulse 1.4s ease-in-out infinite; border-radius: 14px; }
   @keyframes pulse { 50% { box-shadow: 0 0 0 6px rgba(242,193,78,.25); } }
@@ -504,6 +506,7 @@
           <button class="chip" data-v="50">50</button>
           <button class="chip" data-v="100">100</button>
           <button class="chip" data-v="500">500</button>
+          <button id="allIn" class="chip all-in" title="Apostar todas tus fichas">TODO</button>
         </div>
         <div class="bet-line">
           <button id="clearBet" class="ghost">Borrar</button>
