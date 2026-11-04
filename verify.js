@@ -106,6 +106,11 @@ export class Verifier {
       } else {
         const mine = s.fair.nextAnchors[this.myId];
         if (mine && mine !== this.chains.get(R)[0]) this.alert('El host alteró tu compromiso');
+        // host nuevo (o se perdió el mensaje): reenviar el mismo compromiso, como mucho cada 2 s
+        if (!mine && s.players[this.myId]?.connected && Date.now() - (this.anchorSentAt || 0) > 2000) {
+          this.anchorSentAt = Date.now();
+          this.send({ t: 'anchor', round: R, anchor: this.chains.get(R)[0] });
+        }
       }
       const me = s.players[this.myId];
       this.betSeen = me ? me.bet : null;

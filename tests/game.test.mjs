@@ -863,4 +863,147 @@ t('trampa: host se inventa el monto de fichas pedidas', () => {
   assert.ok(vs[0].alerts.some((a) => /inventó el monto|fichas de Host/.test(a)), vs[0].alerts.join(' | '));
 });
 
+// ---------- Cambio de host ----------
+
+// Juega manos completas sobre una partida P2P ya armada, con verificadores para los no-host.
+function playRounds(g, vs, rounds, r, { stopAt } = {}) {
+  const deliver = (from, m) => {
+    if (m.t === 'anchor') G.submitAnchor(g, from, m.round, m.anchor);
+  };
+  for (const [id, v] of vs) v.send = (m) => deliver(id, m);
+  const broadcast = () => {
+    const st = G.publicState(g);
+    for (const v of vs.values()) v.onState(JSON.parse(JSON.stringify(st)));
+  };
+  const step = (fn, act, pending) => {
+    for (;;) {
+      const snap = G.snapshot(g);
+      try {
+        return fn(g);
+      } catch (e) {
+        if (e !== G.NEED_CARD) throw e;
+        G.restore(g, snap);
+        const nn = g.phase === 'dealing' && g.cards.length === 0 ? G.initialCards(g) : 1;
+        const k = g.cards.length;
+        const got = { [G.HOST]: G.hostReveals(g, k, nn) };
+        for (const c of G.activeContributors(g.fair, k)) {
+          if (c === G.HOST) continue;
+          const vals = vs.get(c).onRevealRequest({ round: g.roundNo, k, n: nn, act, pending });
+          if (vals && G.checkReveals(g, c, k, vals)) got[c] = vals;
+          else G.dropContributor(g, c, k);
+        }
+        for (let i = 0; i < nn; i++) {
+          const vals = {};
+          for (const c of G.activeContributors(g.fair, g.cards.length)) vals[c] = got[c][i];
+          G.pushCard(g, vals);
+          broadcast();
+        }
+      }
+    }
+  };
+  broadcast();
+  for (let k = 0; k < rounds; k++) {
+    for (const id of g.seats) {
+      if (!g.players[id].connected) continue;
+      G.rebuy(g, id);
+      G.placeBet(g, id, 10 * (1 + r(10)));
+      broadcast();
+    }
+    if (G.beginRound(g)) continue;
+    broadcast();
+    step(G.dealInitial, -1, null);
+    broadcast();
+    if (stopAt === 'playing' && g.phase === 'playing') return;
+    while (g.phase === 'playing') {
+      const pid = g.turn.pid;
+      const legal = G.legalActions(g, pid);
+      const a = legal[r(legal.length)];
+      if (vs.has(pid)) vs.get(pid).noteAction(a);
+      step((gg) => G.act(gg, pid, a), g.roundLog.actions.length, { pid, a });
+      broadcast();
+    }
+    G.nextRound(g);
+    broadcast();
+  }
+}
+
+function hostChangeTable() {
+  let rnd = 99;
+  const r = (k) => {
+    rnd = (rnd * 1103515245 + 12345) % 2147483648;
+    return rnd % k;
+  };
+  const tok = { h: 'a'.repeat(32), c1: 'b'.repeat(32), c2: 'c'.repeat(32) };
+  const g = G.createGame({ p2p: true });
+  G.joinPlayer(g, 'Host', tok.h, 'h');
+  g.hostId = 'h';
+  G.joinPlayer(g, 'Uno', tok.c1, 'c1');
+  G.joinPlayer(g, 'Dos', tok.c2, 'c2');
+  const vs = new Map(['c1', 'c2'].map((c) => [c, new Verifier(c, () => {})]));
+  return { g, vs, tok, r };
+}
+
+t('cambio de host: tokens validados por hash', () => {
+  const { g, tok } = hostChangeTable();
+  const json = JSON.stringify(G.publicState(g));
+  for (const tk of Object.values(tok)) assert.ok(!json.includes(tk), 'el token no se publica');
+  assert.equal(g.players.c2.tokenHash, G.tokenHash(tok.c2));
+  const { game: g2 } = G.fromState(G.publicState(g), 'c1');
+  assert.equal(g2.players.c2.connected, false);
+  assert.equal(G.joinPlayer(g2, 'Dos', 'f'.repeat(32), 'x').error, 'Ese nombre ya está en uso en la mesa');
+  assert.deepEqual(G.joinPlayer(g2, 'dos', tok.c2, 'x'), { id: 'c2', reconnected: true });
+  assert.deepEqual(G.joinPlayer(g2, 'Host', tok.h, 'y'), { id: 'h', reconnected: true });
+});
+
+t('cambio de host a mitad de mano: se anula, se devuelven apuestas, sigue sin alertas', () => {
+  const { g, vs, tok, r } = hostChangeTable();
+  playRounds(g, vs, 6, r);
+  playRounds(g, vs, 1, r, { stopAt: 'playing' });
+  assert.equal(g.phase, 'playing');
+  const before = Object.fromEntries(g.roundLog.participants.map((p) => [p.id, p.chips]));
+  const items = JSON.stringify(Object.values(g.players).map((p) => p.item));
+  const st = G.publicState(g);
+
+  // c1 se convierte en host: el viejo host y c2 se reconectan como jugadores
+  const { game: g2, voided } = G.fromState(st, 'c1');
+  assert.equal(voided, true);
+  assert.equal(g2.phase, 'betting');
+  assert.equal(g2.roundNo, g.roundNo);
+  for (const id in before) assert.equal(g2.players[id].chips, before[id], 'apuesta devuelta a ' + id);
+  assert.equal(JSON.stringify(Object.values(g2.players).map((p) => p.item)), items);
+  assert.equal(G.joinPlayer(g2, 'Host', tok.h, 'nuevo').id, 'h');
+  assert.equal(G.joinPlayer(g2, 'Dos', tok.c2, 'nuevo').id, 'c2');
+
+  // ahora verifican 'h' (ex host) y 'c2'; c1 es la autoridad
+  const vs2 = new Map([['c2', vs.get('c2')], ['h', new Verifier('h', () => {})]]);
+  playRounds(g2, vs2, 25, r);
+  assert.deepEqual(vs.get('c2').alerts, []);
+  assert.deepEqual(vs2.get('h').alerts, []);
+  assert.ok(vs.get('c2').roundsOk > 20);
+});
+
+t('cambio de host entre manos: nada se pierde', () => {
+  const { g, vs, tok, r } = hostChangeTable();
+  playRounds(g, vs, 5, r);
+  const chips = Object.fromEntries(Object.values(g.players).map((p) => [p.id, p.chips]));
+  const { game: g2, voided } = G.fromState(G.publicState(g), 'c2');
+  assert.equal(voided, false);
+  for (const id in chips) assert.equal(g2.players[id].chips, chips[id]);
+  G.joinPlayer(g2, 'Host', tok.h, 'z');
+  G.joinPlayer(g2, 'Uno', tok.c1, 'z');
+  const vs2 = new Map([['c1', vs.get('c1')], ['h', new Verifier('h', () => {})]]);
+  playRounds(g2, vs2, 10, r);
+  assert.deepEqual(vs.get('c1').alerts, []);
+});
+
+t('trampa: el host nuevo se suma fichas al tomar la mesa', () => {
+  const { g, vs, tok, r } = hostChangeTable();
+  playRounds(g, vs, 4, r);
+  const { game: g2 } = G.fromState(G.publicState(g), 'c1');
+  g2.players.c1.chips += 50000;
+  G.joinPlayer(g2, 'Dos', tok.c2, 'z');
+  playRounds(g2, new Map([['c2', vs.get('c2')]]), 2, r);
+  assert.ok(vs.get('c2').alerts.some((a) => /fichas de Uno/.test(a)), vs.get('c2').alerts.join(' | '));
+});
+
 console.log(`OK ${n} tests`);

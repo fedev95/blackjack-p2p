@@ -4,7 +4,7 @@ Blackjack multijugador en el navegador, peer to peer (WebRTC con [PeerJS](https:
 
 ## Cómo jugar
 
-1. Uno crea la sala, **pública** (entra cualquiera con el link) o **privada** (además hace falta un PIN de 6 dígitos). Su navegador hace de servidor: no tiene que cerrar la pestaña.
+1. Uno crea la sala, **pública** (entra cualquiera con el link) o **privada** (además hace falta un PIN de 6 dígitos). Su navegador coordina la partida. Si se va, otro jugador toma su lugar automáticamente con el mismo código de sala (una mano a medio jugar se anula y se devuelven las apuestas).
 2. Comparte el link de invitación (y el PIN por otro lado, si es privada). Entran hasta 7 jugadores.
 3. La partida corre sola: 15 s para apostar, 20 s por jugada (si no, se planta solo), 6 s entre manos.
 

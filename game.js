@@ -157,8 +157,8 @@ export function createGame({ rules = RULES, p2p = false, shoeFactory = null, car
   }
   hide(g, '_source', source);
   hide(g, '_ptr', 0); // cartas ya consumidas por el motor
-  // Nunca se publica: tokens de los jugadores y la cadena secreta del host.
-  hide(g, '_secret', { tokens: new Map(), hostChain: null });
+  // Nunca se publica: la cadena secreta del host. De los tokens solo se publica el hash (ver joinPlayer).
+  hide(g, '_secret', { hostChain: null });
   return g;
 }
 
@@ -210,15 +210,18 @@ export function cleanName(raw) {
   return String(raw ?? '').replace(CTRL_RE, '').replace(/\s+/g, ' ').trim().slice(0, 20);
 }
 
+// El token de cada jugador es secreto y solo se publica su hash: así cualquier host (también uno nuevo,
+// si el original se va) puede validar una reconexión, y nadie puede robar un lugar sin el token.
+export const tokenHash = (token) => sha256Hex('bj-token|' + token);
+
 // Alta o reconexión. Reconectar exige el token secreto que el jugador generó al entrar.
 export function joinPlayer(g, rawName, token, newId) {
   const name = cleanName(rawName);
   if (!name) return { error: 'Nombre inválido' };
   if (!isHex(token, 32, 128)) return { error: 'Sesión inválida' };
-  const sec = g._secret;
   const existing = Object.values(g.players).find((p) => p.name.toLowerCase() === name.toLowerCase());
   if (existing) {
-    if (sec.tokens.get(existing.id) !== token) return { error: 'Ese nombre ya está en uso en la mesa' };
+    if (existing.tokenHash !== tokenHash(token)) return { error: 'Ese nombre ya está en uso en la mesa' };
     existing.connected = true;
     return { id: existing.id, reconnected: true };
   }
@@ -227,12 +230,13 @@ export function joinPlayer(g, rawName, token, newId) {
     const free = g.seats.find((s) => !g.players[s].connected && !g.round.includes(s));
     if (!free) return { error: 'La mesa está llena' };
     delete g.players[free];
-    sec.tokens.delete(free);
     g.seats = g.seats.filter((s) => s !== free);
   }
   if (g.players[newId] || newId === HOST) return { error: 'Id duplicado' };
-  g.players[newId] = { id: newId, name, chips: g.rules.startChips, bet: 0, sitOut: false, hands: [], connected: true, item: null, rebuys: 0 };
-  sec.tokens.set(newId, token);
+  g.players[newId] = {
+    id: newId, name, chips: g.rules.startChips, bet: 0, sitOut: false, hands: [], connected: true, item: null, rebuys: 0,
+    tokenHash: tokenHash(token),
+  };
   g.seats.push(newId);
   return { id: newId };
 }
@@ -690,6 +694,37 @@ export function nextRound(g) {
   }
   g.message = 'Hagan sus apuestas';
   return null;
+}
+
+// ---------- Cambio de host ----------
+// Si el host se va, otro jugador rearma la partida desde el último estado público. Una mano a medio
+// jugar se anula y se devuelven las apuestas: el host que se fue se llevó su cadena secreta del sorteo
+// y continuarla con otra sería hacer trampa. Todos quedan desconectados hasta que se reconecten.
+export function fromState(state, hostId) {
+  const g = createGame({ rules: state.rules, p2p: true });
+  const s = JSON.parse(JSON.stringify(state));
+  for (const k of ['players', 'seats', 'roundNo', 'tableColor', 'shopLog', 'shopSeq']) if (s[k] !== undefined) g[k] = s[k];
+  g.hostId = hostId;
+  let voided = false;
+  if (s.phase === 'dealing' || s.phase === 'playing') {
+    voided = true;
+    for (const p of (s.roundLog && s.roundLog.participants) || []) if (g.players[p.id]) g.players[p.id].chips = p.chips;
+  }
+  for (const id of g.seats) {
+    const p = g.players[id];
+    p.hands = [];
+    p.bet = 0;
+    p.sitOut = false;
+    p.connected = id === hostId;
+  }
+  g.phase = 'betting';
+  g.round = [];
+  g.turn = null;
+  g.dealer = { cards: [] };
+  g.cards = [];
+  g.roundLog = null;
+  g.message = voided ? 'El host se fue: la mano se anuló y se devolvieron las apuestas' : 'Hagan sus apuestas';
+  return { game: g, voided };
 }
 
 // Estado que se manda a todos. No hay cartas ocultas: lo único privado son los tokens y la cadena del host.

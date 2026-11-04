@@ -12,6 +12,10 @@ let view = null; // estado público que se dibuja
 let hostConn = null; // solo cliente
 let verifier = null; // solo cliente
 let roomCode = null;
+let myName = null;
+let hostPeer = null; // host: su conexión al servidor de señalización
+let clientPeer = null; // cliente: ídem
+let migrating = false; // buscando host nuevo
 
 // ---------- Utilidades ----------
 const lsGet = (k) => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } };
@@ -89,26 +93,72 @@ $('create').onclick = () => {
   const peer = new Peer(PREFIX + code, PEER_OPTIONS);
   peer.on('open', () => {
     if (isHost) return; // reconexión al servidor de señalización
-    isHost = true;
     roomCode = code;
     room = { private: priv, pin: priv ? pin : null };
-    game = G.createGame({ p2p: true });
-    myId = G.joinPlayer(game, name, G.randomHex(16), G.randomHex(8)).id;
-    game.hostId = myId;
-    G.setTableColor(game, lsGet('bj-table-color') || 'green'); // el último color que eligió
+    myName = name;
+    // el host también guarda su token: si se va y vuelve con el link, entra como jugador con sus fichas
+    const token = G.randomHex(16);
+    lsSet('bj-room-' + code, { token, pin: priv ? pin : '' });
+    const g = G.createGame({ p2p: true });
+    myId = G.joinPlayer(g, name, token, G.randomHex(8)).id;
+    g.hostId = myId;
+    G.setTableColor(g, lsGet('bj-table-color') || 'green'); // el último color que eligió
     enterGame();
-    broadcast();
+    startHosting(peer, g);
   });
+  peer.on('error', (e) => {
+    if (isHost) return;
+    lobbyBusy(false);
+    $('lobbyErr').textContent = e.type === 'unavailable-id' ? 'Ese código ya existe, probá de nuevo' : 'Error de red: ' + e.type;
+  });
+};
+
+// Empieza a coordinar la mesa (al crear la sala o al tomarla porque el host anterior se fue).
+function startHosting(peer, g) {
+  isHost = true;
+  hostPeer = peer;
+  game = g;
+  verifier = null;
+  hostConn = null;
+  conns.clear();
+  pending = 0;
+  queue = Promise.resolve();
+  revealWait = null;
+  timerKey = null;
   peer.on('connection', onConnection);
   // si se corta la señalización, las partidas en curso siguen; reintentamos para aceptar nuevos jugadores
   peer.on('disconnected', () => { if (!peer.destroyed) setTimeout(() => peer.reconnect(), 2000); });
   peer.on('error', (e) => {
-    lobbyBusy(false);
-    const msg = e.type === 'unavailable-id' ? 'Ese código ya existe, probá de nuevo' : 'Error de red: ' + e.type;
-    if (!isHost) $('lobbyErr').textContent = msg;
-    else if (e.type !== 'peer-unavailable') $('err').textContent = msg;
+    if (e.type !== 'peer-unavailable') $('err').textContent = 'Error de red: ' + e.type;
   });
-};
+  setupHostUI();
+  broadcast();
+}
+
+// Latido del host: si los jugadores dejan de recibirlo, saben que se fue aunque WebRTC tarde en avisar
+setInterval(() => {
+  if (!isHost) return;
+  for (const c of conns.values()) if (c.open) c.send({ t: 'ping' });
+}, 2000);
+
+// Al cerrar la pestaña, el host se despide y libera el código de sala para que otro lo tome enseguida
+window.addEventListener('pagehide', () => {
+  if (!isHost) return;
+  for (const c of conns.values()) if (c.open) c.send({ t: 'bye' });
+  if (hostPeer) hostPeer.destroy();
+});
+
+// Cliente: sin noticias del host por 7 s = se fue
+let lastHostMsg = 0;
+setInterval(() => {
+  if (isHost || migrating || !hostConn || !myId) return;
+  if (Date.now() - lastHostMsg > 7000) {
+    const c = hostConn;
+    hostConn = null;
+    c.close();
+    onHostLost();
+  }
+}, 1000);
 
 function onConnection(conn) {
   if (pending >= LIMITS.maxPending) {
@@ -237,7 +287,11 @@ async function onClientMsg(conn, info, msg) {
     const old = conns.get(r.id);
     info.pid = r.id;
     conns.set(r.id, conn);
-    if (old && old !== conn) old.close(); // la sesión vieja (otra pestaña o recarga) queda afuera
+    if (old && old !== conn) {
+      // la sesión vieja (otra pestaña o recarga) queda afuera, y se le avisa para que no busque otro host
+      if (old.open) old.send({ t: 'error', error: 'Entraste a la mesa desde otra pestaña o dispositivo.', fatal: true, replaced: true });
+      setTimeout(() => old.close(), 300);
+    }
     conn.send({ t: 'welcome', id: r.id, private: room.private });
     broadcast();
     return;
@@ -267,7 +321,7 @@ async function handle(id, msg) {
 }
 
 // ---------- Cliente ----------
-$('join').onclick = () => {
+$('join').onclick = async () => {
   const name = getName();
   const code = $('code').value.trim().toUpperCase();
   if (!name) return;
@@ -279,69 +333,172 @@ $('join').onclick = () => {
   if (pinTyped) creds.pin = pinTyped;
   $('lobbyErr').textContent = 'Conectando...';
   lobbyBusy(true);
-
-  const peer = new Peer(PEER_OPTIONS);
-  // si en 15 s no entramos, avisar con algo útil en vez de quedar colgados en "Conectando..."
-  const joinTimer = setTimeout(() => {
-    if (myId || peer.destroyed) return; // ya entró, o el host lo rechazó con un mensaje propio
-    peer.destroy();
-    lobbyBusy(false);
-    $('lobbyErr').innerHTML =
+  const r = await joinRoom(code, name, creds, 15000);
+  if (r === 'ok') return;
+  lobbyBusy(false);
+  if (r === 'timeout')
+    $('lobbyErr').textContent =
       'No se pudo conectar con el host. Revisá que el código sea correcto y que la sala siga abierta. ' +
       'Si están en redes distintas, puede ser la red: probá con otro wifi o con datos móviles.';
-  }, 15000);
-  peer.on('connection', (c) => c.close()); // los jugadores solo hablan con el host
-  peer.on('open', () => {
-    hostConn = peer.connect(PREFIX + code, { reliable: true });
-    hostConn.on('open', () => hostConn.send({ t: 'join', name, token: creds.token, pin: creds.pin || '' }));
-    hostConn.on('data', (msg) => {
-      if (!msg || typeof msg !== 'object') return;
-      if (msg.t === 'welcome' && typeof msg.id === 'string') {
-        myId = msg.id;
-        roomCode = code;
-        room = { private: !!msg.private, pin: null };
-        lsSet('bj-room-' + code, creds);
-        verifier = new Verifier(myId, (m) => hostConn.open && hostConn.send(m));
-        clearTimeout(joinTimer);
-        enterGame();
-        setTimeout(showConnType, 3000);
-      } else if (msg.t === 'state' && myId && msg.state) {
-        verifier.onState(msg.state);
-        setView(msg.state, msg.timer);
-      } else if (msg.t === 'reveal?' && verifier) {
-        const values = verifier.onRevealRequest(msg);
-        if (values) hostConn.send({ t: 'reveal', round: msg.round, k: msg.k, values });
-        else renderFair();
-      } else if (msg.t === 'error') {
-        const text = String(msg.error).slice(0, 200);
-        if (myId) {
-          $('err').textContent = text;
+  else if (r === 'unavailable') $('lobbyErr').textContent = 'No existe esa sala (o el host se fue)';
+  else if (r.error) {
+    $('lobbyErr').textContent = r.error;
+    if (r.needPin) {
+      $('joinPinRow').classList.remove('hidden');
+      $('joinPin').focus();
+      lsSet('bj-room-' + code, { ...creds, pin: '' });
+    }
+  }
+};
+
+// Se conecta al host de la sala. Resuelve 'ok', 'timeout', 'unavailable' o { error, needPin }.
+// Se usa al entrar y también para reconectarse si el host cambia.
+function joinRoom(code, name, creds, timeoutMs) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (r) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (r !== 'ok') peer.destroy();
+      resolve(r);
+    };
+    const peer = new Peer(PEER_OPTIONS);
+    const timer = setTimeout(() => done('timeout'), timeoutMs);
+    peer.on('connection', (c) => c.close()); // los jugadores solo hablan con el host
+    peer.on('error', (e) => done(e.type === 'peer-unavailable' ? 'unavailable' : { error: 'Error de red: ' + e.type }));
+    peer.on('open', () => {
+      const conn = peer.connect(PREFIX + code, { reliable: true });
+      conn.on('open', () => conn.send({ t: 'join', name, token: creds.token, pin: creds.pin || '' }));
+      conn.on('data', (msg) => {
+        if (!msg || typeof msg !== 'object') return;
+        if (hostConn === conn || msg.t === 'welcome') lastHostMsg = Date.now();
+        if (msg.t === 'ping') return;
+        if (msg.t === 'bye') {
+          if (hostConn === conn) {
+            hostConn = null;
+            onHostLost();
+          }
+          return;
+        }
+        if (msg.t === 'welcome' && typeof msg.id === 'string') {
+          if (clientPeer && clientPeer !== peer) clientPeer.destroy();
+          clientPeer = peer;
+          hostConn = conn;
+          roomCode = code;
+          myName = name;
+          room = { private: !!msg.private, pin: creds.pin || null };
+          lsSet('bj-room-' + code, creds);
+          const send = (m) => hostConn === conn && conn.open && conn.send(m);
+          if (verifier && myId === msg.id) verifier.send = send; // reconexión: el verificador sigue igual
+          else verifier = new Verifier(msg.id, send);
+          myId = msg.id;
+          enterGame();
+          setTimeout(showConnType, 3000);
+          done('ok');
+        } else if (hostConn !== conn) {
+          if (msg.t === 'error') done({ error: String(msg.error).slice(0, 200), needPin: !!msg.needPin });
+        } else if (msg.t === 'state' && msg.state) {
+          verifier.onState(msg.state);
+          setView(msg.state, msg.timer);
+        } else if (msg.t === 'reveal?') {
+          const values = verifier.onRevealRequest(msg);
+          if (values) conn.send({ t: 'reveal', round: msg.round, k: msg.k, values });
+          else renderFair();
+        } else if (msg.t === 'error') {
+          $('err').textContent = String(msg.error).slice(0, 200);
+          if (msg.replaced) conn.replaced = true;
           actLock = null;
           render();
-        } else {
-          $('lobbyErr').textContent = text;
-          lobbyBusy(false);
-          if (msg.needPin) {
-            $('joinPinRow').classList.remove('hidden');
-            $('joinPin').focus();
-            lsSet('bj-room-' + code, { ...creds, pin: '' });
-          }
-          if (msg.fatal) peer.destroy();
         }
+      });
+      conn.on('close', () => {
+        if (hostConn !== conn || isHost) return;
+        if (conn.replaced) return; // entramos desde otra pestaña: no hay que buscar otro host
+        onHostLost();
+      });
+    });
+  });
+}
+
+// ---------- El host se fue: otro jugador toma la mesa ----------
+// Todos tienen el mismo último estado, así que coinciden en quién sigue: el primer jugador conectado
+// en el orden de la mesa. Ese intenta quedarse con el código de sala; los demás se reconectan al mismo
+// código. Si el elegido tampoco aparece, a los 8 s lo intenta el siguiente, y así.
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function onHostLost() {
+  if (migrating || isHost) return;
+  migrating = true;
+  const last = view;
+  const oldHost = last && last.players[last.hostId];
+  const code = roomCode;
+  const creds = lsGet('bj-room-' + code) || {};
+  hostConn = null;
+  $('err').textContent = `${oldHost ? oldHost.name : 'El host'} se desconectó. Reorganizando la mesa...`;
+  const order = last ? last.seats.filter((id) => id !== last.hostId && last.players[id] && last.players[id].connected) : [];
+  const k = order.indexOf(myId);
+  const start = Date.now();
+  while (Date.now() - start < 90000) {
+    if (k >= 0 && Date.now() - start >= k * 8000 && last) {
+      const peer = await claimRoom(code);
+      if (peer) {
+        becomeHost(peer, last, oldHost);
+        migrating = false;
+        return;
       }
+    }
+    const r = await joinRoom(code, myName, creds, 5000);
+    if (r === 'ok') {
+      $('err').textContent = '';
+      migrating = false;
+      return;
+    }
+    if (r && r.error) {
+      $('err').textContent = r.error;
+      migrating = false;
+      return;
+    }
+    await sleep(1500);
+  }
+  $('err').textContent = 'No se pudo rearmar la mesa. Recargá la página para volver a intentar.';
+  migrating = false;
+}
+
+// Intenta quedarse con el código de sala. Falla si el host anterior todavía lo tiene.
+function claimRoom(code) {
+  return new Promise((resolve) => {
+    const peer = new Peer(PREFIX + code, PEER_OPTIONS);
+    const timer = setTimeout(() => {
+      peer.destroy();
+      resolve(null);
+    }, 6000);
+    peer.on('open', () => {
+      clearTimeout(timer);
+      resolve(peer);
     });
-    hostConn.on('close', () => {
-      if (myId) $('err').textContent = 'Se cortó la conexión con el host. Recargá la página para volver (conservás tus fichas).';
+    peer.on('error', () => {
+      clearTimeout(timer);
+      peer.destroy();
+      resolve(null);
     });
   });
-  peer.on('error', (e) => {
-    clearTimeout(joinTimer);
-    lobbyBusy(false);
-    const t = e.type === 'peer-unavailable' ? 'No existe esa sala (o el host se fue)' : 'Error de red: ' + e.type;
-    if (myId) $('err').textContent = t;
-    else $('lobbyErr').textContent = t;
-  });
-};
+}
+
+function becomeHost(peer, last, oldHost) {
+  if (clientPeer) clientPeer.destroy();
+  clientPeer = null;
+  const { game: g, voided } = G.fromState(last, myId);
+  const me = g.players[myId];
+  const was = oldHost ? oldHost.name : 'El host';
+  g.message = voided
+    ? `${was} se fue: la mano se anuló y se devolvieron las apuestas. Ahora coordina ${me.name}`
+    : `${was} se fue. Ahora coordina ${me.name}`;
+  const creds = lsGet('bj-room-' + roomCode) || {};
+  room = { private: room.private, pin: room.private ? creds.pin || null : null };
+  $('err').textContent = '';
+  startHosting(peer, g);
+}
 
 // Muestra en el modal ⓘ si la conexión con el host es directa o pasa por un servidor de respaldo.
 async function showConnType() {
@@ -367,24 +524,28 @@ function enterGame() {
   $('game').classList.remove('hidden');
   $('roomCode').textContent = roomCode;
   $('roomVis').textContent = room.private ? '🔒 Privada' : '🌐 Pública';
-  $('netInfo').textContent = isHost ? '(sos el host: no cierres esta pestaña)' : '';
+  if (!isHost) $('netInfo').textContent = '';
   const link = location.origin + location.pathname + '?sala=' + roomCode;
   $('copy').onclick = () =>
     navigator.clipboard.writeText(link).then(() => {
       $('copy').textContent = '✓ Copiado';
       setTimeout(() => ($('copy').textContent = '🔗 Copiar link'), 1800);
     });
-  if (isHost) {
-    $('colorPick').classList.remove('hidden');
-    document.querySelectorAll('#colorPick button').forEach((b) => {
-      b.onclick = () => enqueue(() => {
-        if (G.setTableColor(game, b.dataset.c)) return;
-        lsSet('bj-table-color', b.dataset.c);
-        broadcast();
-      });
+}
+
+// Controles que solo tiene el que coordina la mesa
+function setupHostUI() {
+  $('netInfo').textContent = 'Coordinás la mesa. Si cerrás la pestaña, otro jugador toma tu lugar.';
+  $('infoBtn').classList.remove('alert');
+  $('colorPick').classList.remove('hidden');
+  document.querySelectorAll('#colorPick button').forEach((b) => {
+    b.onclick = () => enqueue(() => {
+      if (G.setTableColor(game, b.dataset.c)) return;
+      lsSet('bj-table-color', b.dataset.c);
+      broadcast();
     });
-  }
-  if (isHost && room.private) {
+  });
+  if (room.private && room.pin) {
     $('showPin').classList.remove('hidden');
     $('showPin').onclick = () => {
       const shown = $('showPin').dataset.shown === '1';
